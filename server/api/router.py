@@ -1,8 +1,16 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 from .api import get_image, get_image_sets, get_images, get_test_ground_truth
+from .preprocessing import get_preprocessing_steps, run_preprocessing_pipeline
 
 api_router = APIRouter()
+
+api_router.add_api_route('/preprocessing/steps/', get_preprocessing_steps, methods=['GET'], tags=['Preprocessing'])
+api_router.add_api_route(
+    '/preprocessing/pipeline/', run_preprocessing_pipeline, methods=['GET'],
+    tags=['Preprocessing'], response_class=Response,
+    responses={200: {'content': {'image/png': {}}}},
+)
 
 api_router.add_api_route("/image_sets", get_image_sets, methods=["GET"])
 api_router.add_api_route("/images/{image_set}/{split}", get_images, methods=["GET"])
