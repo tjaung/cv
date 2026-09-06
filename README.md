@@ -10,3 +10,5 @@ I also made a one class SVM for anomaly detection. I use grid search to train a 
 It turns out that all of the models label good data as good, and all rust images as bad. They all fail on scratches, which is what I feared since the beginning. Looking at the PCA components, most of the variance is described by magnitude. This is great for rust, but it does not pick up enough detail lighter scratches and scratch patches. The scratches that do get flagged as bad are deeper scratches where the metal can be seen. This makes sense since magnitude will pick up this larger change in brightness. Lighter scratches are more blue, similar to the plate paint, and scratch patches are more brown. I need some stronger feature to pick up scrathces, otherwise this will never work.
 
 I added frangi filters and that seemed to help. I only got one model to work well, an SVM with a linear kernel and ν = 0.01.
+
+I think Im going to try out using a classifier now instead of an anomaly detector. I want to try a classifier for each class and an object detection model for finding scratches and rust.
