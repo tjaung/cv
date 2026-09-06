@@ -43,8 +43,8 @@ def extract_patch_features(image, image_id='', patch_size=64, min_coverage=0.5):
     if not 0 < min_coverage <= 1:
         raise ValueError('Coverage must be in (0, 1]')
 
-    result = preprocess_plate(image, run_glare_fill=False)
-    plate, mask = result.plate, result.plate_mask
+    result = preprocess_plate(image)
+    plate, mask = result.final_plate, result.plate_mask
     valid = cv2.erode(mask, np.ones((3, 3), np.uint8), borderType=cv2.BORDER_CONSTANT, borderValue=0) != 0
 
     if not valid.any():

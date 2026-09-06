@@ -4,26 +4,31 @@ from pathlib import Path
 
 import numpy as np
 
-from ..patch_features import FEATURE_NAMES, FEATURE_VERSION, PatchData, extract_patch_features, pipeline_signature
+from ..patch_features import PatchData
+from ..feature_sets import feature_names, feature_version, feature_signature, extract_model_features
 
 
 class PCAAnomalyDetector:
 
-    def __init__(self, variance_target=0.95, patch_size=64, min_coverage=0.5, distance_metric="squared_l2"):
+    def __init__(self, variance_target=0.95, patch_size=64, min_coverage=0.5, distance_metric="squared_l2", feature_set="lab_sobel"):
         if not 0 < variance_target < 1:
             raise ValueError('Variance target must be between 0 and 1')
         if distance_metric not in ('l1', 'l2', 'mahalanobis', 'squared_l2'):
             raise ValueError('Unknown distance metric')
 
         self.config = {'variance_target': variance_target, 'patch_size': patch_size,
-                       'distance_metric': distance_metric, 'min_coverage': min_coverage, 'quantile': .99, 'source': 'normalized_segmented_before_glare',
-                       'feature_version': FEATURE_VERSION, 'pipeline_signature': pipeline_signature()}
+                       'distance_metric': distance_metric, 'min_coverage': min_coverage, 'quantile': .99, 'source': 'full_pipeline_color_after_contrast',
+                       'feature_set': feature_set, 'feature_version': feature_version(feature_set), 'pipeline_signature': feature_signature(feature_set)}
         self.fitted = False
+
+    @property
+    def feature_names(self):
+        return feature_names(self.config.get('feature_set', 'lab_sobel'))
 
     def fit(self, training: PatchData, calibration: PatchData):
         x, c = training.values, calibration.values
         for values, records in [(x, training.records), (c, calibration.records)]:
-            if values.ndim != 2 or values.shape[1] != len(FEATURE_NAMES) or len(values) != len(records) or not np.isfinite(values).all():
+            if values.ndim != 2 or values.shape[1] != len(self.feature_names) or len(values) != len(records) or not np.isfinite(values).all():
                 raise ValueError('Invalid feature matrix or records')
         if len(x) < 3 or not len(c):
             raise ValueError('Need at least three training patches and held-out calibration patches')
@@ -92,7 +97,7 @@ class PCAAnomalyDetector:
     def score(self, patches: PatchData):
         values = patches.values
 
-        if values.ndim != 2 or values.shape[1] != len(FEATURE_NAMES) or not len(values) or len(patches.records) != len(values) or not np.isfinite(values).all():
+        if values.ndim != 2 or values.shape[1] != len(self.feature_names) or not len(values) or len(patches.records) != len(values) or not np.isfinite(values).all():
             raise ValueError('Invalid patch feature vectors')
 
         z, reconstructed, errors = self._project(values)
@@ -117,16 +122,16 @@ class PCAAnomalyDetector:
                 'patches': rows}, z, reconstructed, errors
 
     def test_image(self, image, image_id=''):
-        if self.config['pipeline_signature'] != pipeline_signature():
+        if self.config['pipeline_signature'] != feature_signature(self.config.get('feature_set', 'lab_sobel')):
             raise ValueError('Preprocessing or feature code changed; retrain the model')
 
-        patches = extract_patch_features(image, image_id, self.config['patch_size'], self.config['min_coverage'])
+        patches = extract_model_features(image, image_id, self.config['patch_size'], self.config['min_coverage'], self.config.get('feature_set', 'lab_sobel'))
         result, z, reconstructed, errors = self.score(patches)
 
         return result, patches, z, reconstructed, errors
 
     def summary(self):
-        return {'config': self.config, 'features': len(FEATURE_NAMES), 'feature_names': FEATURE_NAMES,
+        return {'config': self.config, 'features': len(self.feature_names), 'feature_names': self.feature_names,
                 'components': len(self.components), 'retained_variance': float(self.explained_ratio[:len(self.components)].sum()),
                 'explained_variance_ratio': self.explained_ratio.tolist(),
                 'patch_threshold': self.patch_threshold, 'plate_threshold': self.plate_threshold,
@@ -143,8 +148,8 @@ class PCAAnomalyDetector:
     def export_features(self, path, patches, split):
         z, reconstruction, errors = self._project(patches.values)
         standardized = (patches.values - self.mean) / self.scale
-        columns = list(patches.records[0]) + ['split', 'error'] + FEATURE_NAMES
-        columns += ['scaled_' + name for name in FEATURE_NAMES] + ['reconstructed_' + name for name in FEATURE_NAMES]
+        columns = list(patches.records[0]) + ['split', 'error'] + self.feature_names
+        columns += ['scaled_' + name for name in self.feature_names] + ['reconstructed_' + name for name in self.feature_names]
         columns += [f'PC{i + 1}' for i in range(z.shape[1])]
         with Path(path).open('w', newline='') as stream:
             writer = csv.writer(stream)
@@ -162,7 +167,7 @@ class PCAAnomalyDetector:
             arrays['residual_precision'] = self.residual_precision
 
         np.savez_compressed(directory / 'model.npz', **arrays)
-        metadata = {'config': self.config, 'feature_names': FEATURE_NAMES, 'train_records': self.train_records,
+        metadata = {'config': self.config, 'feature_names': self.feature_names, 'train_records': self.train_records,
                     'cal_records': self.cal_records, 'patch_threshold': self.patch_threshold,
                     'plate_threshold': self.plate_threshold, 'cal_plate_errors': self.cal_plate_errors}
         (directory / 'model.json').write_text(json.dumps(metadata))
@@ -171,7 +176,7 @@ class PCAAnomalyDetector:
 
         with (directory / 'components.csv').open('w', newline='') as stream:
             writer = csv.writer(stream)
-            writer.writerow(['component', 'eigenvalue'] + FEATURE_NAMES)
+            writer.writerow(['component', 'eigenvalue'] + self.feature_names)
             for i, component in enumerate(self.components):
                 writer.writerow([f'PC{i + 1}', self.eigenvalues[i]] + component.tolist())
 
@@ -180,7 +185,7 @@ class PCAAnomalyDetector:
         directory = Path(directory)
         metadata = json.loads((directory / 'model.json').read_text())
 
-        if metadata['feature_names'] != FEATURE_NAMES or metadata['config']['feature_version'] != FEATURE_VERSION:
+        if metadata['feature_names'] != feature_names(metadata['config'].get('feature_set', 'lab_sobel')) or metadata['config']['feature_version'] != feature_version(metadata['config'].get('feature_set', 'lab_sobel')):
             raise ValueError('Saved model feature schema is incompatible')
 
         model = cls()

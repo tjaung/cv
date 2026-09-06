@@ -19,7 +19,7 @@ if __package__:
     from .plate_mask import extract_plate_mask
     from .apply_mask import apply_plate_mask
     from .clahe import apply_clahe
-    from .canny_edge import apply_canny_edge_detection
+    from .contrast import increase_contrast
 else:
     from inpainting import glare_threshold
     from surrounding_color_fill import fill_surrounding_color
@@ -34,7 +34,7 @@ else:
     from plate_mask import extract_plate_mask
     from apply_mask import apply_plate_mask
     from clahe import apply_clahe
-    from canny_edge import apply_canny_edge_detection
+    from contrast import increase_contrast
 
 
 @dataclass
@@ -54,12 +54,13 @@ class PreprocessingResult:
     blended_plate: np.ndarray
     blurred_plate: np.ndarray
     clahe_plate: np.ndarray
-    segmented_edges: np.ndarray
+    contrast_plate: np.ndarray
+    final_plate: np.ndarray
 
 
 def preprocess_plate(image, luminance_percentage=10, blur_size=5,
                      fill_holes=True, allow_border_touching=True, sobel_strength=1.0, threshold_offset=20,
-                     glare_cutoff=220, surrounding_radius=5, run_glare_fill=True, blend_width=3):
+                     glare_cutoff=220, surrounding_radius=5, run_glare_fill=True, blend_width=3, contrast_factor=1.5):
 
     if image.dtype != np.uint8 or image.ndim != 3 or image.shape[2] != 3 or image.size == 0:
         raise ValueError('Expected a nonempty 8-bit BGR image')
@@ -81,12 +82,19 @@ def preprocess_plate(image, luminance_percentage=10, blur_size=5,
     blurred_plate[plate_mask == 0] = 0
     clahe_plate = apply_clahe(blurred_plate)
     clahe_plate[plate_mask == 0] = 0
-    segmented_edges = apply_canny_edge_detection(clahe_plate)
+    contrast_plate = increase_contrast(clahe_plate, contrast_factor)
+    contrast_plate[plate_mask == 0] = 0
+    # Retain repaired chroma so color and texture features share the same
+    # fully processed input, rather than discarding LAB/HSV color information.
+    color = cv2.cvtColor(blended_plate, cv2.COLOR_BGR2YCrCb)
+    color[:, :, 0] = contrast_plate
+    final_plate = cv2.cvtColor(color, cv2.COLOR_YCrCb2BGR)
+    final_plate[plate_mask == 0] = 0
 
     return PreprocessingResult(normalized, gray, blurred, edge_bold, threshold, threshold_mask,
                                cleaned_mask, plate_mask, plate,
                                plate_gray, glare_mask, color_filled_plate, blended_plate,
-                               blurred_plate, clahe_plate, segmented_edges)
+                               blurred_plate, clahe_plate, contrast_plate, final_plate)
 
 
 def main():
@@ -94,6 +102,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('image', nargs='?', type=Path, default=default_image)
     parser.add_argument('--luminance-percentage', type=float, default=10)
+    parser.add_argument('--contrast-factor', type=float, default=1.5)
     parser.add_argument('--blur-size', type=int, default=5)
     parser.add_argument('--sobel-strength', type=float, default=1.0)
     parser.add_argument('--threshold-offset', type=float, default=20)
@@ -107,7 +116,7 @@ def main():
     image = get_image(str(args.image))
     result = preprocess_plate(image, args.luminance_percentage, args.blur_size,
                               not args.keep_holes, args.allow_border_touching, args.sobel_strength, args.threshold_offset,
-                              args.glare_cutoff, args.surrounding_radius, blend_width=args.blend_width)
+                              args.glare_cutoff, args.surrounding_radius, blend_width=args.blend_width, contrast_factor=args.contrast_factor)
     if not result.plate_mask.any():
         print('No enclosed plate found. Check contrast, morphology, or --allow-border-touching.')
 
@@ -118,7 +127,7 @@ def main():
               ('Segmented plate', result.plate),
               ('Plate grayscale', result.plate_gray), ('Glare threshold', result.glare_mask),
               ('Surrounding color fill', result.color_filled_plate), ('Boundary blend', result.blended_plate),
-              ('Plate blur', result.blurred_plate), ('CLAHE', result.clahe_plate), ('Canny edges', result.segmented_edges)]
+              ('Plate blur', result.blurred_plate), ('CLAHE', result.clahe_plate), ('Contrast / final plate', result.final_plate)]
     import matplotlib.pyplot as plt
     figure, axes = plt.subplots(4, 4, figsize=(16, 16), layout='constrained')
     figure.suptitle(args.image.name)
