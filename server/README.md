@@ -337,3 +337,63 @@ shared-within-worker feature cache and one BLAS thread per operation. Finished
 models appear in the client every five seconds. Failed saves remove their new
 incomplete directory; disk-full errors stop scheduling further configurations.
 Previously incomplete folders are left untouched.
+
+
+## Supervised classifiers
+
+`POST /classifiers/train/` with `{"seed":42}` runs 42 PCA-centroid/SVC/KNN
+configurations. All use a shared stratified mixed 80/20 split and up to five
+grouped CV folds on training data only. Exact duplicate content stays together.
+Scaling and PCA are fitted within each fold; final models refit on the full 80%.
+Default ranking is CV macro F1. Every model predicts original class-folder labels.
+
+`GET /classifiers/` returns split membership, reports, failures and the active job.
+Poll `/models/jobs/{job_id}` for progress. `GET /classifiers/inspect/` takes
+`model_id` and `image_index` (the index in the shared holdout). It returns every
+training point and only the selected holdout point, actual KNN neighbors, SVM
+support-vector indices, and a stable PC1/PC2 projection. Fixed display bounds
+cover the training points and all saved holdout projections, while only the
+selected holdout point is drawn. Class-colored decision regions use a fixed slice through the training mean
+in the remaining PCs; they stay unchanged when switching selected images.
+
+Runs live in `artifacts/classifiers/<run_id>/`, with shared feature CSV/NPZ,
+split and CV fold manifests, fitted joblib files, and atomic summary updates.
+The current pointer selects the latest run; earlier runs stay saved. Extraction
+failures stop the run rather than silently changing the shared holdout.
+
+`GET /classifiers/review/?run_id=<id>&image_index=<n>` classifies an image
+with every fitted classifier in that saved run. Indices address the combined
+`summary.train + summary.test` inventory. Results include original class,
+training/holdout membership, prediction, and correctness for every model.
+It reuses the run's saved feature vectors without retraining or writing files.
+The classifier listing includes `summary.run_id` for this purpose.
+
+The client random-review section selects unused paths without replacement and
+persists a path-to-boolean dictionary, current selection, and predictions in
+browser local storage per run/model set. An image is counted only after all
+models return successfully; retries keep the same image. Arrow navigation is
+scoped to the focused random-review section. At exhaustion, the final ranking
+shows overall, training, holdout, and per-class correct counts. Results can be
+downloaded as JSON. Combined accuracy includes seen training images and is not
+an estimate of unseen-data performance.
+
+Classifier overfitting diagnostics include final-model training evaluation next
+to holdout evaluation, and training-minus-holdout accuracy/macro-F1 gaps in
+percentage points. CV metrics remain validation-fold scores, not training scores.
+`GET /classifiers/training_metrics/?run_id=<id>` returns evaluations keyed by
+model ID. New models save these during training; older runs are evaluated from
+saved training vectors and fitted models, cached in memory, without retraining.
+Training scores can be optimistic, particularly KNN self-matches. A positive
+gap is a diagnostic signal, not a definitive overfitting classification.
+
+Learning curves are available per selected classifier via
+`GET /classifiers/learning_curves/?run_id=...&model_id=...` and generated with
+`POST /classifiers/learning_curves/` (`run_id`, `model_id` JSON body). Generation
+uses the shared background-job queue. Each point refits an unfitted pipeline
+copy on nested 20/40/60/80/100% class-stratified training-group subsets in the
+saved CV folds. It reports training/validation classification error (1-accuracy)
+and balanced error (1-balanced accuracy), with fold standard deviations.
+These are sample-size learning curves, not optimizer/epoch loss histories.
+No held-out test data is used and fitted model artifacts are not replaced.
+Points with any failed fold are marked unavailable. Results are saved beside
+the selected model as `<model_id>-learning-curves.json`.

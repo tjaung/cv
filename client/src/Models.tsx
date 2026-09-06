@@ -179,7 +179,7 @@ export default function Models() {
     }
     window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler)
   }, [images, imageIndex])
-  return <section className="models-comparison-page"><div className="page-intro"><h2>Models</h2><p>Compare PCA and one-class SVM. Every new model uses all 459 LAB, Sobel, HOG, and Frangi features from the complete preprocessing pipeline.</p></div>
+  return <section className="models-comparison-page"><div className="page-intro"><h2>Anomaly detection</h2><p>Compare PCA and one-class SVM. Every new model uses all 459 LAB, Sobel, HOG, and Frangi features from the complete preprocessing pipeline.</p></div>
     <div className="model-controls panel model-training"><button disabled={!!job || starting} onClick={() => void retrain()}>Retrain all models ({count})</button><span>All supported parameter combinations · replaces fitted runs and preserves previous result records.</span></div>
     <nav className="model-tabs" aria-label="Filter model types">{[['all', 'All models'], ['pca', 'PCA'], ['svm', 'One-class SVM']].map(([value, label]) => <button key={value} aria-current={family === value ? 'page' : undefined} onClick={() => setFamily(value)}>{label}</button>)}</nav>
     {error && <p role="alert" className="panel empty">{error}</p>}

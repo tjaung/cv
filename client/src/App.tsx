@@ -3,6 +3,7 @@ import DatasetViewer from './DatasetViewer'
 import Preprocessing from './Preprocessing'
 import Features from './Features'
 import Models from './Models'
+import Classifiers from './Classifiers'
 import './App.css'
 
 const tabs = [
@@ -10,7 +11,8 @@ const tabs = [
   { id: 'dataset', name: 'Dataset viewer' },
   { id: 'preprocessing', name: 'Preprocessing' },
   { id: 'features', name: 'Features' },
-  { id: 'models', name: 'Models' },
+  { id: 'models', name: 'Anomaly detection' },
+  { id: 'classifiers', name: 'Classifiers' },
 ]
 
 function currentTab() {
@@ -27,7 +29,8 @@ function Overview() {
         <li><a href="#dataset"><strong>Dataset viewer <span aria-hidden="true">→</span></strong><span>Browse folders, switch between grid and single images, and overlay ground truth.</span></a></li>
         <li><a href="#preprocessing"><strong>Preprocessing <span aria-hidden="true">→</span></strong><span>Explore training and test metal plates through normalization, thresholding, cleanup, and masking.</span></a></li>
         <li><a href="#features"><strong>Features <span aria-hidden="true">→</span></strong><span>Explore LAB and Sobel heatmaps and compare color distributions across good plates and defect types.</span></a></li>
-        <li><a href="#models"><strong>Models <span aria-hidden="true">→</span></strong><span>Train normal-only patch PCA, inspect feature CSVs, and evaluate anomaly scores on test plates.</span></a></li>
+        <li><a href="#models"><strong>Anomaly detection <span aria-hidden="true">→</span></strong><span>Train normal-only patch PCA, inspect feature CSVs, and evaluate anomaly scores on test plates.</span></a></li>
+        <li><a href="#classifiers"><strong>Classifiers →</strong><span>Compare supervised PCA, SVM, and KNN on a mixed 80/20 split.</span></a></li>
       </ol>
       <p>The preprocessing workflow uses a blurred grayscale copy with darkened edges to find the plate. The final mask is applied to the normalized color image so surface detail remains visible. Inspect bright-region masks and try glare removal using surrounding-color fill and boundary blending.</p>
     </div>
@@ -47,7 +50,7 @@ function App() {
     <nav className="app-tabs" aria-label="Workspace tabs">
       {tabs.map((item) => <a key={item.id} href={`#${item.id}`} aria-current={tab === item.id ? 'page' : undefined}>{item.name}</a>)}
     </nav>
-    {tab === 'overview' ? <Overview /> : tab === 'dataset' ? <DatasetViewer /> : tab === 'preprocessing' ? <Preprocessing /> : tab === 'features' ? <Features /> : <Models />}
+    {tab === 'overview' ? <Overview /> : tab === 'dataset' ? <DatasetViewer /> : tab === 'preprocessing' ? <Preprocessing /> : tab === 'features' ? <Features /> : tab === 'classifiers' ? <Classifiers /> : <Models />}
   </main>
 }
 

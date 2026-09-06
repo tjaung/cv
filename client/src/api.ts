@@ -188,7 +188,7 @@ export interface PCAModel extends PCAReport {
   training_errors: number[]; calibration_errors: number[]; training_points: PCAPoint[]; calibration_points: PCAPoint[]
 }
 export interface ModelJob {
-  job_id: string; kind: 'train' | 'test' | 'evaluate' | 'sweep' | 'evaluate_all' | 'svm_grid' | 'retrain_all'; status: 'queued' | 'running' | 'complete' | 'failed'
+  job_id: string; kind: 'classifier_curves' | 'classifiers' | 'train' | 'test' | 'evaluate' | 'sweep' | 'evaluate_all' | 'svm_grid' | 'retrain_all'; status: 'queued' | 'running' | 'complete' | 'failed'
   combination?: number; combinations?: number; completed?: number; failed?: number; workers?: number
   phase: string; done: number; total: number; error?: string
   result?: PCATest | PCAEvaluation | { model_id: string } | { model_ids: string[]; failures: { error: string }[] }
@@ -232,4 +232,14 @@ export type PCAProjection = Pick<PCATest, 'model_id' | 'image_id' | 'prediction'
 export async function getModelProjection(modelId: string, imagePath: string, signal?: AbortSignal): Promise<PCAProjection> {
   const query = new URLSearchParams({ model_id: modelId, image_path: imagePath })
   return (await request(`/models/projection/?${query}`, signal)).json()
+}
+
+export async function classifierRequest<T>(path = '', body?: object, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}/classifiers/${path}`, {
+    method: body ? 'POST' : 'GET', signal,
+    ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
+  })
+  const data = await response.json()
+  if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Classifier request failed')
+  return data
 }

@@ -12,3 +12,5 @@ It turns out that all of the models label good data as good, and all rust images
 I added frangi filters and that seemed to help. I only got one model to work well, an SVM with a linear kernel and ν = 0.01.
 
 I think Im going to try out using a classifier now instead of an anomaly detector. I want to try a classifier for each class and an object detection model for finding scratches and rust.
+
+Classifiers work amazingly. SVMs seemed to perform the best with my pick being a linear kernel SVM with variance_target = 0.95 and C=0.1. I worry that these models could be overfitting.

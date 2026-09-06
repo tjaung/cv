@@ -1,3 +1,5 @@
+from .classifiers import get_classifier_curves, train_classifier_curves
+from .classifiers import list_classifiers, train_classifiers, inspect_classifier, classify_review_image, get_classifier_training_metrics
 from .model_lifecycle import clear_models, retrain_all_models, download_history
 from .one_class_svm import train_svm_grid
 from fastapi import APIRouter, Response
@@ -49,3 +51,14 @@ api_router.add_api_route(
     get_test_ground_truth,
     methods=["GET"],
 )
+
+api_router.add_api_route('/classifiers/', list_classifiers, methods=['GET'], tags=['Classifiers'])
+api_router.add_api_route('/classifiers/train/', train_classifiers, methods=['POST'], tags=['Classifiers'])
+api_router.add_api_route('/classifiers/inspect/', inspect_classifier, methods=['GET'], tags=['Classifiers'])
+
+api_router.add_api_route('/classifiers/review/', classify_review_image, methods=['GET'], tags=['Classifiers'])
+
+api_router.add_api_route('/classifiers/training_metrics/', get_classifier_training_metrics, methods=['GET'], tags=['Classifiers'])
+
+api_router.add_api_route('/classifiers/learning_curves/', get_classifier_curves, methods=['GET'], tags=['Classifiers'])
+api_router.add_api_route('/classifiers/learning_curves/', train_classifier_curves, methods=['POST'], tags=['Classifiers'])
