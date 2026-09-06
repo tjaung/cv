@@ -251,3 +251,5 @@ TODOs.md
 
 # runtime-created symlink for glob-import playground tests
 playground/glob-import/root/follow-symlinks/linked/my-lib
+# Trained models, feature CSVs, and inference outputs
+/artifacts/models/

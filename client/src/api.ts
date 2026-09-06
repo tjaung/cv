@@ -151,3 +151,71 @@ export async function getFeatureHistograms(source: FeatureSource, split: Feature
   const query = new URLSearchParams({ source, split })
   return (await request(`/features/histograms/?${query}`, signal)).json()
 }
+
+export interface PCAPatchRecord {
+  image_id: string; patch_id: number; left: number; top: number; right: number; bottom: number; pixels: number; coverage: number
+}
+export interface PCAPoint { image_id: string; patch_id: number; scores: number[]; error: number }
+export interface PCATest {
+  model_id: string; test_id: string; image_id: string; prediction: 'GOOD' | 'BAD'; plate_score: number
+  patch_threshold: number; plate_threshold: number; anomalous_patches: number; membership: string
+  image: string; anomaly_map: string; coverage_mask: string; map_max: number
+  patches: (PCAPatchRecord & { scores: number[]; error: number; anomalous: boolean; nearest_distance: number; mahalanobis: number; nearest_patch: PCAPatchRecord })[]
+}
+export interface PCAEvaluation {
+  images: number; tp: number; tn: number; fp: number; fn: number; recall: number | null; precision: number | null; false_positive_rate: number | null
+  groups: Record<string, { images: number; flagged: number }>
+  skipped: { image_id: string; reason: string }[]
+  rows: { image_id: string; label: string; actual: string; prediction: string; score: number; patches: number; anomalous_patches: number }[]
+}
+export interface PCAReport {
+  model_id: string; name: string; features: number; components: number; retained_variance: number
+  training_images: number; calibration_images: number; training_patches: number; calibration_patches: number
+  patch_threshold: number; plate_threshold: number
+  explained_variance_ratio: number[]
+  compatible?: boolean
+  config: { distance_metric?: string; patch_size: number; variance_target: number; quantile: number; source: string }
+  skipped: { image_id: string; reason: string }[]
+  evaluation?: PCAEvaluation | null
+}
+export interface PCAModel extends PCAReport {
+  component_weights: number[][]
+  feature_names: string[]; explained_variance_ratio: number[]; calibration_plate_errors: number[]
+  training_errors: number[]; calibration_errors: number[]; training_points: PCAPoint[]; calibration_points: PCAPoint[]
+}
+export interface ModelJob {
+  job_id: string; kind: 'train' | 'test' | 'evaluate' | 'sweep' | 'evaluate_all'; status: 'queued' | 'running' | 'complete' | 'failed'
+  combination?: number; combinations?: number
+  phase: string; done: number; total: number; error?: string
+  result?: PCATest | PCAEvaluation | { model_id: string } | { model_ids: string[]; failures: { error: string }[] }
+}
+export interface PCAFeaturePage { total: number; columns: string[]; rows: { record: PCAPatchRecord; error: number; values: number[] }[] }
+export async function getModels(): Promise<{ models: PCAReport[]; active_job: ModelJob | null }> {
+  return (await request('/models/')).json()
+}
+export async function getPCAModel(modelId: string): Promise<PCAModel> {
+  return (await request(`/models/pca/?model_id=${encode(modelId)}`)).json()
+}
+export async function getModelJob(jobId: string, signal?: AbortSignal): Promise<ModelJob> {
+  return (await request(`/models/jobs/${encode(jobId)}`, signal)).json()
+}
+export async function startPCAJob(kind: ModelJob['kind'], body: object = {}, modelId?: string): Promise<{ job_id: string }> {
+  const response = await fetch(`${API_BASE_URL}/models/pca/${kind}/${modelId ? `?model_id=${encode(modelId)}` : ''}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => null)
+    throw new Error(typeof error?.detail === 'string' ? error.detail : `Model request failed (${response.status})`)
+  }
+  return response.json()
+}
+export async function getPCAFeaturePage(modelId: string, split: string, view: string, offset: number, testId?: string, signal?: AbortSignal): Promise<PCAFeaturePage> {
+  const query = new URLSearchParams({ model_id: modelId, split, view, offset: String(offset), limit: '15' })
+  if (testId) query.set('test_id', testId)
+  return (await request(`/models/pca/features/?${query}`, signal)).json()
+}
+export function getPCADownloadUrl(modelId: string, file: string, testId?: string): string {
+  const query = new URLSearchParams({ model_id: modelId, file })
+  if (testId) query.set('test_id', testId)
+  return `${API_BASE_URL}/models/pca/download/?${query}`
+}

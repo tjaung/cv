@@ -146,3 +146,63 @@ counts/normalized histogram/pixel count, and 16 regions with bounds and counts.
 independent of `bins`) and each class's `lbp_regions` (16 pooled, independently
 normalized histograms and pixel counts). Neighborhoods crossing background
 are excluded. Regional tiles follow each image's unaligned plate bounding box.
+
+## Models / PCA
+
+The Models tab trains and evaluates `CV.models.PCAAnomalyDetector`.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /models/` | Current model comparison, evaluation metrics, active job |
+| `POST /models/pca/train/` | Good-only training job; JSON `patch_size=64`, `variance_target=0.95`, `seed=42` |
+| `GET /models/jobs/{job_id}` | Progress, completion result, or error |
+| `GET /models/pca/` | PCA metadata, variance, training/calibration coordinates and errors |
+| `POST /models/pca/test/` | JSON `image_path`; patch scores, nearest references, anomaly map |
+| `POST /models/pca/evaluate/` | Evaluate all metal_plate/test images with fixed thresholds |
+| `GET /models/pca/features/` | Complete feature rows, paginated with `offset`, `limit` |
+| `GET /models/pca/download/` | CSV downloads for training, calibration, test, components, evaluation |
+
+Train/test/evaluate return a `job_id`. Model operations run in a single background
+worker; concurrent mutations return 409. Jobs are in-memory and stop on server
+restart. Completed models and test results persist under ignored
+`artifacts/models/pca/<model_id>/`. A new training run preserves older runs and
+atomically updates the current-model pointer. Optional `model_id` selects a run.
+
+Feature browsing accepts `split=training|calibration|test` and
+`view=raw|standardized|reconstructed|pca`. Test features require `test_id`.
+Downloads use `file=training|calibration|test|components|evaluation`; tests require
+`test_id`. Complete CSV includes every vector, standardized vector, standardized
+reconstruction, error, and PCA coordinate. The client table displays 15 rows per
+page and every feature column. Source paths are resolved within the dataset.
+
+Training uses only train/good, approximately 80/20 split by image with identical
+files grouped together. Both patch and plate thresholds are fixed to the 99th
+percentile of held-out good scores. Evaluation never adjusts thresholds and
+reports skipped/unscorable images separately. Defect recall, good false alarms,
+precision, and per-folder outcomes appear in the comparison panel.
+
+See [PCA feature schema and calibration](../CV/models/README.md).
+
+### PCA experiment sweeps
+
+`POST /models/pca/sweep/` trains and evaluates the Cartesian product of
+`patch_sizes` (32, 64, 128), `variance_targets` (0.90, 0.95, 0.99), and
+`distance_metrics` (`l1`, `l2`, `mahalanobis`). Omit fields to run all 27;
+pass singleton lists to train one configuration. The seed defaults to 42.
+Every run gets its own ID, calibrated thresholds, feature CSVs, PCA weights,
+and test evaluation. Extracted features are reused during the job; every
+combination uses the same split by image. Poll the returned job ID as usual;
+sweep results include completed IDs and any per-combination failures.
+
+`GET /models/` lists all saved runs with evaluations, PCA variance ratios,
+and preprocessing compatibility. `POST /models/pca/evaluate_all/` evaluates
+all compatible saved runs. Existing `model_id` query parameters select the
+run for inspection, scoring, exports, or individual evaluation.
+
+Metrics score the standardized reconstruction residual: L1 is its absolute
+sum, L2 is its Euclidean norm, and Mahalanobis uses training-only residual
+covariance plus a diagonal ridge of 1% of average residual variance (minimum
+1e-8). Each metric calibrates patch and plate thresholds independently at the
+99th percentile on held-out good images. Old runs without a metric retain
+squared-L2 scores. The separately reported nearest training-patch distance
+is still Euclidean in retained PCA space; it does not drive classification.

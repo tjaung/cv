@@ -1,10 +1,22 @@
 from fastapi import APIRouter, Response
 
+from .models import train_pca_sweep, evaluate_all_pca, get_models, get_pca_model, train_pca, test_pca, evaluate_pca, get_model_job, get_pca_features, download_pca_features
 from .features import get_features, get_feature_histograms
 from .api import get_image, get_image_sets, get_images, get_test_ground_truth
 from .preprocessing import get_preprocessing_steps, run_preprocessing_pipeline
 
 api_router = APIRouter()
+
+api_router.add_api_route('/models/', get_models, methods=['GET'], tags=['Models'])
+api_router.add_api_route('/models/jobs/{job_id}', get_model_job, methods=['GET'], tags=['Models'])
+api_router.add_api_route('/models/pca/', get_pca_model, methods=['GET'], tags=['Models'])
+api_router.add_api_route('/models/pca/sweep/', train_pca_sweep, methods=['POST'], tags=['Models'])
+api_router.add_api_route('/models/pca/evaluate_all/', evaluate_all_pca, methods=['POST'], tags=['Models'])
+api_router.add_api_route('/models/pca/train/', train_pca, methods=['POST'], tags=['Models'])
+api_router.add_api_route('/models/pca/test/', test_pca, methods=['POST'], tags=['Models'])
+api_router.add_api_route('/models/pca/evaluate/', evaluate_pca, methods=['POST'], tags=['Models'])
+api_router.add_api_route('/models/pca/features/', get_pca_features, methods=['GET'], tags=['Models'])
+api_router.add_api_route('/models/pca/download/', download_pca_features, methods=['GET'], tags=['Models'])
 
 api_router.add_api_route('/features/', get_features, methods=['GET'], tags=['Features'])
 api_router.add_api_route('/features/histograms/', get_feature_histograms, methods=['GET'], tags=['Features'])

@@ -76,3 +76,25 @@ highlights its position. Class comparisons can switch between whole-plate and
 4×4 regional LBP overlays using the existing class/source/split controls. Every
 LBP plot uses the same ten categories and 0–100% vertical scale. Narrow screens
 scroll the regional grids horizontally to preserve their 4×4 spatial layout.
+
+## Models tab
+
+The comparison table is followed by model tabs (PCA initially). The PCA view
+supports background training, scoring one test image, fixed-threshold test-set
+evaluation, component selectors for the eigenspace plot, explained variance,
+error distributions, anomaly/coverage maps, full feature tables, and CSV export.
+Distances use all retained components even when the graph displays two.
+New training runs preserve previous artifacts. Training is only on good images;
+99th-percentile error calibration uses separate good images and never test data.
+
+Models now supports saved experiment selection and parameter sweeps. The
+training dropdowns allow one value or all values for patch size, retained
+variance target, and reconstruction-distance metric. The resulting Cartesian
+product is trained and evaluated through `POST /models/pca/sweep/`.
+
+The holistic section compares every saved run, includes PCA variance profiles,
+and displays a selected image's predictions, scores, thresholds, and normalized
+score ratios across all runs. The lower parameter filters select a saved run
+for detailed PCA/image inspection. Raw scores from different metrics have
+different units; score/threshold is not a probability. Old preprocessing runs
+remain inspectable, but cannot score new images until retrained.
