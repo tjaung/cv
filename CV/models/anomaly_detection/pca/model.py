@@ -4,8 +4,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ..patch_features import PatchData
-from ..feature_sets import feature_names, feature_version, feature_signature, extract_model_features
+from ...patch_features import PatchData
+from ...feature_sets import feature_names, feature_version, feature_signature, extract_model_features
 
 
 class PCAAnomalyDetector:
