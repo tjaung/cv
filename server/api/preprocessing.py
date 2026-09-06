@@ -13,7 +13,7 @@ from CV.preprocessing import preprocess_plate
 STEPS = [
     {'number': 0, 'name': 'Raw image', 'description': 'The original image before preprocessing.'},
     {'number': 1, 'name': 'Normalize', 'description': 'Move each pixel’s luminance toward the midpoint, retaining color.'},
-    {'number': 2, 'name': 'Grayscale', 'description': 'Convert the normalized color image to grayscale.'},
+    {'number': 2, 'name': 'Grayscale', 'description': 'Convert the original color image to grayscale for the segmentation branch.'},
     {'number': 3, 'name': 'Blur', 'description': 'Create a slightly blurred grayscale copy using a 5×5 Gaussian kernel by default.'},
     {'number': 4, 'name': 'Edge darkening', 'description': 'Widen the Sobel edge-strength map with a 5×5 dilation, then darken edges at full strength for thicker, darker outlines.'},
     {'number': 5, 'name': 'ISODATA', 'description': 'Threshold the edge-darkened grayscale image and identify background from the border.'},
@@ -26,7 +26,7 @@ STEPS = [
     {'number': 12, 'name': 'Boundary blend', 'description': 'Blend the color fill inward over 3 pixels by default. Only glare pixels change; narrow highlights may retain some brightness. Set blend width to zero for a solid fill.'},
     {'number': 13, 'name': 'Plate blur', 'description': 'Apply Gaussian blur to a grayscale copy of the blended plate (5×5 by default), keeping the background black.'},
     {'number': 14, 'name': 'CLAHE', 'description': 'Enhance local contrast on the blurred grayscale plate (clip limit 2, 8×8 tiles), keeping the background black.'},
-    {'number': 15, 'name': 'Canny edges', 'description': 'Run Canny (100/200) on the CLAHE result as the final step. Includes the plate boundary against the masked background.'},
+    {'number': 15, 'name': 'Contrast / final plate', 'description': 'Increase CLAHE luminance contrast by 1.5× around 127.5, clip to 0–255, and restore repaired color channels. This final color plate feeds all preprocessed features and both model types.'},
 ]
 LAST_STEP = len(STEPS) - 1
 COLOR_FILL_STEP = 11
@@ -45,11 +45,12 @@ def run_preprocessing_pipeline(
     threshold_offset: Annotated[float, Query(ge=-100, le=100)] = 20,
     glare_cutoff: Annotated[float, Query(ge=0, le=255)] = 220,
     surrounding_radius: Annotated[int, Query(ge=1, le=31)] = 5,
+    contrast_factor: Annotated[float, Query(ge=1, le=10)] = 1.5,
     blend_width: Annotated[int, Query(ge=0, le=31)] = 3,
     fill_holes: bool = True,
     allow_border_touching: bool = True,
 ):
-    """Return the final Canny edges as PNG, or an intermediate cumulative stage."""
+    """Return the final contrast-enhanced color plate as PNG, or an intermediate cumulative stage."""
     if blur_size % 2 == 0:
         raise HTTPException(422, 'Blur size must be odd')
     path = resolve_image_path(image_path)
@@ -57,13 +58,13 @@ def run_preprocessing_pipeline(
     if image is None:
         raise HTTPException(422, 'Could not decode image')
     result = preprocess_plate(
-        image, glare_cutoff=glare_cutoff, surrounding_radius=surrounding_radius, blend_width=blend_width, run_glare_fill=step >= COLOR_FILL_STEP,
+        image, contrast_factor=contrast_factor, glare_cutoff=glare_cutoff, surrounding_radius=surrounding_radius, blend_width=blend_width, run_glare_fill=step >= COLOR_FILL_STEP,
         luminance_percentage=luminance_percentage, blur_size=blur_size,
         fill_holes=fill_holes, allow_border_touching=allow_border_touching, sobel_strength=sobel_strength, threshold_offset=threshold_offset,
     )
     stages = [image, result.normalized, result.gray, result.blurred, result.edge_bold,
               result.threshold_mask, result.cleaned_mask, result.plate_mask, result.plate,
-              result.plate_gray, result.glare_mask, result.color_filled_plate, result.blended_plate, result.blurred_plate, result.clahe_plate, result.segmented_edges]
+              result.plate_gray, result.glare_mask, result.color_filled_plate, result.blended_plate, result.blurred_plate, result.clahe_plate, result.final_plate]
     success, encoded = cv2.imencode('.png', stages[step])
     if not success:
         raise HTTPException(500, 'Could not encode preprocessing result')

@@ -98,3 +98,60 @@ score ratios across all runs. The lower parameter filters select a saved run
 for detailed PCA/image inspection. Raw scores from different metrics have
 different units; score/threshold is not a probability. Old preprocessing runs
 remain inspectable, but cannot score new images until retrained.
+
+The Models training tabs now include **One-class SVM**. Its grid controls
+kernel, nu, and gamma, with fixed selectable patch size and PCA variance for
+each sweep. Results join the cross-family model statistics, per-image matrix,
+and PCA summaries. Family/kernel/nu/gamma filters select individual runs.
+Score-minus-threshold replaces the ratio so negative SVM scores and cutoffs
+remain meaningful: positive means BAD. This margin is not a probability,
+and its raw units differ across runs. Anomaly maps and histograms include
+negative score ranges. Per-run inspection retains arrow browsing, patch
+maps, PCA coordinates, and feature CSVs.
+
+HOG is shown in Features as gradient-orientation glyphs, a normalized
+orientation histogram, the 16×9 raw cell matrix, and all 324 descriptor values.
+Class curves pool normalized HOG block weights per label and respect the
+original/preprocessed source selector. Models adds a Features dropdown to
+both PCA and SVM training and a feature-set filter for saved runs. Options:
+LAB + Sobel, LAB + HOG, or LAB + Sobel + HOG. The same choice is persisted for
+inference, feature CSVs, and PCA component contributions (including HOG).
+
+Preprocessing step 15 is now Contrast / final plate, replacing Canny edges.
+The default factor is 1.5; `getPreprocessedImage` accepts an optional final
+`contrastFactor` argument. The final color plate restores repaired chroma
+around the enhanced luminance. All model feature sets and the Features tab's
+preprocessed source use this complete output, including glare repair, plate
+blur, CLAHE, and contrast. Saved runs from the previous pipeline require
+retraining; they are not silently reused with the changed inputs.
+
+“Retrain all models” uses `POST /models/retrain_all/` to train every saved
+unique configuration and replace its current fitted model after successful
+training and evaluation. Previous reports and image scores remain in the
+Results history table, which compares old/current metrics and follows the
+selected image. JSON history downloads include all retained result records.
+Saved recipes keep this button usable even when all fitted models have been
+cleared. The frontend does not automatically start retraining after a clear.
+
+Comparison and history tables support sortable column headers; clicking the
+same header reverses direction. Default summary order is higher defect recall,
+then lower good-image false-positive rate. An optional balanced ranking uses
+(recall + specificity) / 2. The per-image comparison defaults to correct
+predictions first and recalculates for the selected image. Missing results
+stay last in either direction. History supports these rankings too.
+
+The Models page is now a unified comparison view. All/PCA/One-class SVM tabs
+filter summary rows, image predictions, and PCA-analysis choices. One retrain
+button rebuilds all 135 supported parameter combinations with all features;
+there are no individual training controls or feature-set choices. The summary
+ends with one sortable column per dataset class: correct/total (percentage
+of evaluated images in that class). GOOD is correct for good plates and BAD
+for defect images; these are binary anomaly decisions, not multiclass labels.
+
+Individual predictions use three columns: image, sortable model results,
+and PCA scatter. Clicking a model requests a read-only projection and updates
+the graph; changing images also updates it. Separate PCA analysis retains
+variance and component composition. Its model dropdown, previous/next buttons,
+and left/right keys while focused in that section change the analyzed model.
+Elsewhere, left/right keys continue browsing images. Result history remains
+stored/downloadable through the API but is no longer a separate page section.

@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 from fastapi import HTTPException, Query
 
-from CV.features import cielab_features, lab_histograms, sobel_features, hsv_features, hsv_histograms, sobel_histograms, lbp_features, lbp_histograms
+from CV.features import cielab_features, lab_histograms, sobel_features, hsv_features, hsv_histograms, sobel_histograms, lbp_features, lbp_histograms, hog_features, frangi_features
 from CV.preprocessing import preprocess_plate
 from .os_helpers import folder_path, image_path as resolve_image_path, IMAGE_EXTENSIONS
 
@@ -17,7 +17,7 @@ Source = Literal['original', 'preprocessed']
 Split = Literal['all', 'train', 'test']
 HISTOGRAM_RANGES = {'L': (0, 100), 'a': (-128, 128), 'b': (-128, 128),
                     'H': (0, 360), 'S': (0, 100), 'V': (0, 100),
-                    'magnitude': (0, 181), 'orientation': (0, 180), 'lbp': (-0.5, 9.5)}
+                    'magnitude': (0, 181), 'orientation': (0, 180), 'lbp': (-0.5, 9.5), 'hog': (-10, 170), 'frangi_dark': (0, 1), 'frangi_bright': (0, 1)}
 
 
 def _load(path, source):
@@ -26,7 +26,7 @@ def _load(path, source):
         raise HTTPException(422, 'Could not decode image')
     result = preprocess_plate(image)
     # Same ROI in both modes: changes in background area cannot bias comparison.
-    return (image if source == 'original' else result.blended_plate), result.plate_mask
+    return (image if source == 'original' else result.final_plate), result.plate_mask
 
 
 def _png(image, interpolation=cv2.INTER_AREA):
@@ -85,6 +85,9 @@ def get_features(image_path: Annotated[str, Query(min_length=1)], source: Source
                                      ('Direction (°)', 'direction', (-180, 180), 'cyclic')]:
         keep = interior & sobel['direction_valid'] if key == 'direction' else interior
         maps.append(_map(name, sobel[key], keep, limits, palette, matrix_size))
+    ridges = frangi_features(image, mask)
+    for key in ('dark', 'bright'):
+        maps.append(_map(f'Frangi · {key} ridges', ridges[key], ridges['valid'], (0, 1), 'sequential', matrix_size))
     codes = lbp_features(image)
     texture = lbp_histograms(codes, mask)
     display = np.rint(codes.astype(np.float32) * (255 / 9)).astype(np.uint8)
@@ -96,9 +99,15 @@ def get_features(image_path: Annotated[str, Query(min_length=1)], source: Source
     lbp = {'image': _png(display, cv2.INTER_NEAREST), 'bounds': texture['bounds'], **distribution(texture['counts']),
            'regions': [{**{key: value for key, value in region.items() if key != 'counts'},
                         **distribution(region['counts'])} for region in texture['regions']]}
+    hog_result = hog_features(image, mask)
+    weights = hog_result['orientation']
+    hog = {'image': _png(hog_result['visualization']), 'bounds': hog_result['bounds'],
+           'descriptor': hog_result['descriptor'].tolist(), 'cells': hog_result['cells'].tolist(),
+           'histogram': (weights / weights.sum()).tolist() if weights.sum() else weights.tolist(),
+           'valid_pixels': hog_result['valid_pixels']}
     hist = lab_histograms(lab, mask)
     return {'name': path.name, 'source': source, 'width': image.shape[1], 'height': image.shape[0],
-            'plate_pixels': int(valid.sum()), 'image': _png(image), 'mask': _png(mask), 'maps': maps, 'lbp': lbp,
+            'plate_pixels': int(valid.sum()), 'image': _png(image), 'mask': _png(mask), 'maps': maps, 'lbp': lbp, 'hog': hog,
             'histograms': {key: {'counts': counts.tolist(), 'edges': edges.tolist()} for key, (counts, edges) in hist.items()}}
 
 
@@ -113,6 +122,10 @@ def _image_histogram(path, mtime_ns, size, source, bins):
             **hsv_histograms(hsv_features(image), mask, bins),
             **sobel_histograms(features, interior, bins)}
     texture = lbp_histograms(lbp_features(image), mask)
+    hist['hog'] = (hog_features(image, mask)['orientation'], np.arange(10) * 20 - 10)
+    ridges = frangi_features(image, mask)
+    for key in ('dark', 'bright'):
+        hist[f'frangi_{key}'] = np.histogram(ridges[key][ridges['valid']], bins=bins, range=(0, 1))
     hist['lbp'] = (texture['counts'], np.arange(11) - 0.5)
     summary = {'interior_pixels': int(strengths.size), 'magnitude_sum': float(strengths.sum(dtype=np.float64)),
                'strong_edge_pixels': int(np.count_nonzero(strengths >= 10))}
@@ -138,7 +151,7 @@ def get_feature_histograms(source: Source = 'original', split: Split = 'all',
             group = groups.setdefault(label, {'name': label, 'images': 0, 'pixels': 0, 'splits': {},
                                                'interior_pixels': 0, 'magnitude_sum': 0.0, 'strong_edge_pixels': 0,
                                                'lbp_region_counts': np.zeros((16, 10), np.int64),
-                                               'counts': {key: np.zeros(10 if key == 'lbp' else bins, np.float64) for key in HISTOGRAM_RANGES}})
+                                               'counts': {key: np.zeros(10 if key == 'lbp' else 9 if key == 'hog' else bins, np.float64) for key in HISTOGRAM_RANGES}})
             try:
                 safe = resolve_image_path('metal_plate', str(relative))
                 stat = safe.stat()
@@ -172,6 +185,6 @@ def get_feature_histograms(source: Source = 'original', split: Split = 'all',
                                   'strong_edge_fraction': group.pop('strong_edge_pixels') / n if n else None}
 
         output.append(group)
-    return {'source': source, 'split': split, 'weighting': 'pooled valid pixels per channel; orientation weighted by gradient magnitude; nonempty curves sum to 1',
-            'edges': {key: np.linspace(*limits, 11 if key == 'lbp' else bins + 1).tolist() for key, limits in HISTOGRAM_RANGES.items()},
+    return {'source': source, 'split': split, 'weighting': 'pooled valid pixels per channel; orientation weighted by gradient magnitude; HOG pools block-normalized orientation weights; nonempty curves sum to 1',
+            'edges': {key: np.linspace(*limits, 11 if key == 'lbp' else 10 if key == 'hog' else bins + 1).tolist() for key, limits in HISTOGRAM_RANGES.items()},
             'groups': output, 'skipped': skipped}

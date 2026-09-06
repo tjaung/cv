@@ -206,3 +206,134 @@ covariance plus a diagonal ridge of 1% of average residual variance (minimum
 99th percentile on held-out good images. Old runs without a metric retain
 squared-L2 scores. The separately reported nearest training-patch distance
 is still Euclidean in retained PCA space; it does not drive classification.
+
+### One-class SVM experiments
+
+`POST /models/one_class_svm/grid/` trains every distinct requested combination
+and evaluates each saved run. Defaults are `patch_size: 64`,
+`variance_target: 0.95`, `kernels: ["rbf", "linear"]`,
+`nus: [0.01, 0.05, 0.1]`, `gammas: ["scale", 0.01, 0.1]`, and `seed: 42`.
+Gamma is ignored for linear kernels, giving 12 default combinations.
+Singleton lists train one configuration. Poll `/models/jobs/{job_id}`;
+completed jobs return saved IDs and any per-combination failures.
+
+The normal-only pipeline is segmentation → LAB/Sobel patch features →
+training-fitted standardization → training-fitted PCA → one-class SVM.
+Nu, kernel, and gamma control the boundary. Patch anomaly scores are negative
+SVM decision margins, so higher is more anomalous. Plate scores use the
+maximum patch score. Patch and plate thresholds are independently calibrated
+at the 99th percentile using held-out good images; the native zero-margin
+boundary is not the final calibrated app verdict. Scores/cutoffs may be
+negative. This grid is an exhaustive experiment sweep, not a supervised
+cross-validation procedure: it neither fits on test labels nor chooses a
+winner from test performance.
+
+`GET /models/` includes both families. SVM runs support
+`GET /models/one_class_svm/`, `POST /models/one_class_svm/test/`, and
+`POST /models/one_class_svm/evaluate/` with `model_id`. Existing shared
+feature/download endpoints also accept SVM run IDs. For compatibility, both
+families use the existing `artifacts/models/pca/{model_id}` artifact store;
+`config.model_type` selects the loader. Numeric SVM support vectors,
+coefficients, and intercepts are persisted without pickle. The reusable
+class is `CV.models.OneClassSVMDetector`; scikit-learn is needed for training.
+The PCA visualization shows the SVM inputs, not the full fitted SVM boundary.
+
+### HOG feature sets
+
+PCA training/sweeps and one-class SVM grids accept `feature_set`:
+`lab_sobel` (105 values, existing default), `lab_hog` (366), or
+`lab_sobel_hog` (429). Each HOG patch uses a 4×4 cell grid, nine unsigned
+orientation bins with interpolated angular votes, and overlapping 2×2-cell
+blocks normalized by L2-Hys (normalize, clip at 0.2, normalize again).
+The HOG portion contains 324 values. Cell dimensions follow patch dimensions,
+including partial edge patches; gradients are computed before patch slicing
+and only valid plate-interior pixels vote. No patch seam gradients are added.
+
+`CV.features.hog_features` provides a whole-ROI visualization/descriptor;
+`hog_from_gradients` reuses existing Sobel maps. `CV.models.extract_model_features`
+extracts the chosen model feature set. `/features/` returns `hog` with an image,
+cell histogram matrix, normalized descriptor, and pooled orientation summary.
+`/features/histograms/` adds HOG class curves pooling normalized block weights.
+The feature explorer describes a whole-plate grid; classifiers retain a
+separate grid in every patch. Orientation-bin centers are 0°, 20°, …, 160°;
+orientations wrap at 180°. Preview line directions represent gradient normals.
+
+Feature schemas and signatures are stored per run, and CSVs/PCA loadings use
+that run's feature names. Legacy LAB/Sobel schemas remain loadable and their
+extractor is unchanged. Adding HOG requires training a new run; it is never
+appended to an existing fitted scaler or model. The shared comparison table
+and model filters include the feature set.
+
+### Final preprocessing output for features
+
+The pipeline now ends with plate blur → CLAHE → contrast enhancement (default
+factor 1.5 around the 127.5 midpoint), replacing the final segmented Canny
+edges. `contrast_factor` is available on `/preprocessing/pipeline/` (1–10).
+Step 15 returns the final color plate: enhanced grayscale luminance combined
+with repaired YCrCb chroma, converted to BGR and masked again. Values outside
+the plate stay black; gamut conversion may clip saturated colors.
+
+`PreprocessingResult.contrast_plate` is the enhanced grayscale matrix and
+`final_plate` is the final color feature input. The old `segmented_edges`
+result is removed; the independent Canny function remains available.
+Both PCA and SVM extract all feature sets from `final_plate`, with glare
+repair enabled. Features' preprocessed mode uses exactly the same final
+image; original mode remains available as an explicit comparison. This
+supersedes earlier descriptions of extracting before glare repair or CLAHE.
+The preprocessing signature changes, so old runs remain inspectable but must
+be retrained before scoring images through this new pipeline.
+
+### Replacing models and retaining results
+
+`POST /models/clear/` archives all model reports, evaluations, and saved
+per-image score/patch results before deleting fitted model directories.
+It also persists unique training recipes in `artifacts/models/pca/recipes.json`.
+The clear operation rejects requests while a model job is running.
+
+`POST /models/retrain_all/` rebuilds the saved recipes plus any current model
+configurations using the current feature/preprocessing implementation. Duplicate
+recipes are trained once. The recipe includes family, seed, feature set, patch
+size, retained-variance target, coverage, and PCA metric or SVM kernel/nu/gamma.
+Each new run trains and evaluates before it replaces matching current runs.
+Old results are archived first; failed replacements retain the current run.
+Retraining does not select parameters based on test performance.
+
+History records live in `artifacts/models/pca/history/{old_model_id}.json`.
+They include hyperparameters, preprocessing signature, PCA summary statistics,
+full test-set predictions and metrics, and numerical per-image/patch results.
+Image blobs and fitted weights/feature-vector files are not retained in history.
+`GET /models/history/{model_id}` downloads a record. `GET /models/` includes
+`history` and `retrain_configurations` alongside current runs. History is not
+removed by clearing or replacement and is available for cross-run comparison.
+
+### Unified all-feature comparison workflow
+
+All new API training requests now use `lab_sobel_hog` (429 values); requests
+for feature subsets are rejected. Legacy artifacts remain loadable for
+comparison. The retrain-all catalog is the full supported grid, independent
+of saved recipes: patch sizes 32/64/128 × variance targets .90/.95/.99 ×
+3 PCA distances (27 runs), plus the same patch/variance grid × 12 unique
+SVM kernel/nu/gamma combinations (108 runs). Total: 135. Legacy feature-set
+variants and squared-L2/L2 equivalents match one replacement configuration.
+Historical reports retain their actual original settings.
+
+`GET /models/projection/?model_id=...&image_path=...` returns the selected
+image's patch PCA coordinates and model scores without creating a job or
+writing test artifacts. It uses the same preprocessing/signature validation
+as scoring. The client uses it when a prediction-table model row is clicked.
+
+
+Frangi features: `CV.features.frangi_features` returns dark/bright multiscale
+ridge responses (sigma 1, 2, 3 pixels; beta 0.5; fixed gamma 0.05 on [0,1]
+grayscale) and a 12-pixel inset validity mask. Feature previews include both
+maps and pooled class histograms. New API training uses
+`lab_sobel_hog_frangi` (459 values): the existing 429 values plus a normalized
+12-bin histogram and mean/std/max for each polarity per patch. Empty Frangi
+interiors produce zero descriptors. Existing saved models retain their original
+schema; retrain all to include Frangi. No training is started automatically.
+
+Retrain-all runs up to three concurrent workers, grouped by patch size, with a
+shared-within-worker feature cache and one BLAS thread per operation. Finished
+models appear in the client every five seconds. Failed saves remove their new
+incomplete directory; disk-full errors stop scheduling further configurations.
+Previously incomplete folders are left untouched.

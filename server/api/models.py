@@ -6,6 +6,7 @@ from functools import lru_cache
 import hashlib
 import json
 import math
+import shutil
 from itertools import product
 from pathlib import Path
 from threading import Lock
@@ -18,8 +19,8 @@ from fastapi import HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from CV.models import PCAAnomalyDetector, PatchData, extract_patch_features
-from CV.models.patch_features import FEATURE_NAMES, pipeline_signature
+from CV.models import OneClassSVMDetector, PCAAnomalyDetector, PatchData, extract_patch_features
+from CV.models.feature_sets import extract_model_features, feature_signature
 from .os_helpers import folder_path, image_path, IMAGE_EXTENSIONS
 from .features import _png
 
@@ -34,9 +35,11 @@ class TrainRequest(BaseModel):
     variance_target: float = Field(default=.95, gt=0, lt=1)
     seed: int = Field(default=42, ge=0)
     distance_metric: Literal['l1', 'l2', 'mahalanobis'] = 'l2'
+    feature_set: Literal['lab_sobel_hog_frangi'] = 'lab_sobel_hog_frangi'
 
 
 class SweepRequest(BaseModel):
+    feature_set: Literal['lab_sobel_hog_frangi'] = 'lab_sobel_hog_frangi'
     patch_sizes: list[Literal[32, 64, 128]] = Field(default=[32, 64, 128], min_length=1, max_length=3)
     variance_targets: list[Literal[.9, .95, .99]] = Field(default=[.9, .95, .99], min_length=1, max_length=3)
     distance_metrics: list[Literal['l1', 'l2', 'mahalanobis']] = Field(default=['l1', 'l2', 'mahalanobis'], min_length=1, max_length=3)
@@ -63,7 +66,9 @@ def _directory(model_id=None):
 
 @lru_cache(maxsize=3)
 def _model(directory):
-    return PCAAnomalyDetector.load(directory)
+    metadata = json.loads((Path(directory) / 'model.json').read_text())
+    detector = OneClassSVMDetector if metadata['config'].get('model_type') == 'one_class_svm' else PCAAnomalyDetector
+    return detector.load(directory)
 
 
 def _progress(job_id, phase, done=0, total=0):
@@ -101,19 +106,21 @@ def get_model_job(job_id: str):
 def get_models():
     with _lock:
         active = next((dict(job) for job in _jobs.values() if job['status'] in ('queued', 'running')), None)
-    reports = []
-    for file in sorted(ARTIFACT_ROOT.glob('*/report.json'), key=lambda p: p.stat().st_mtime, reverse=True):
-        directory = file.parent
-        if not (directory / 'model.npz').exists():
-            continue
-        report = json.loads(file.read_text())
-        evaluation = json.loads((directory / 'evaluation.json').read_text()) if (directory / 'evaluation.json').exists() else None
-        if 'explained_variance_ratio' not in report:
-            with np.load(directory / 'model.npz', allow_pickle=False) as arrays:
-                report['explained_variance_ratio'] = arrays['explained_ratio'].tolist()
-        report['compatible'] = report['config'].get('pipeline_signature') == pipeline_signature()
-        reports.append({**report, 'evaluation': evaluation})
-    return {'models': reports, 'active_job': active}
+    with _lock:
+        reports = []
+        for file in sorted(ARTIFACT_ROOT.glob('*/report.json'), key=lambda p: p.stat().st_mtime, reverse=True):
+            directory = file.parent
+            if (directory / '.pending').exists() or not (directory / 'model.npz').exists():
+                continue
+            report = json.loads(file.read_text())
+            evaluation = json.loads((directory / 'evaluation.json').read_text()) if (directory / 'evaluation.json').exists() else None
+            if 'explained_variance_ratio' not in report:
+                with np.load(directory / 'model.npz', allow_pickle=False) as arrays:
+                    report['explained_variance_ratio'] = arrays['explained_ratio'].tolist()
+            report['compatible'] = report['config'].get('pipeline_signature') == feature_signature(report['config'].get('feature_set', 'lab_sobel'))
+            reports.append({**report, 'evaluation': evaluation})
+        from .model_lifecycle import catalog, history
+        return {'models': reports, 'active_job': active, 'history': history(), 'retrain_configurations': len(catalog())}
 
 
 def get_pca_model(model_id: str | None = None):
@@ -123,13 +130,14 @@ def get_pca_model(model_id: str | None = None):
             'component_weights': model.components.tolist()}
 
 
-def _train_pca(body: TrainRequest, job_id=None, feature_cache=None):
+def _train_pca(body: TrainRequest, job_id=None, feature_cache=None, model_factory=None, publish=True):
     root = folder_path('metal_plate', 'train', 'good')
     paths = [image_path('metal_plate', 'train', 'good', str(path.relative_to(root))) for path in sorted(root.rglob('*'))
              if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS and not any(p.startswith('.') for p in path.relative_to(root).parts)]
     if len(paths) < 5:
         raise HTTPException(422, 'Need at least five good training images for image-disjoint calibration')
     def train(job_id):
+        model = model_factory() if model_factory else PCAAnomalyDetector(body.variance_target, body.patch_size, distance_metric=body.distance_metric, feature_set=body.feature_set)
         groups = {}
         for path in paths:
             groups.setdefault(hashlib.sha256(path.read_bytes()).hexdigest(), []).append(path)
@@ -151,10 +159,10 @@ def _train_pca(body: TrainRequest, job_id=None, feature_cache=None):
                 try:
                     if image is None:
                         raise ValueError('Could not decode image')
-                    cache_key = (name, body.patch_size)
+                    cache_key = (name, body.patch_size, body.feature_set, model.config['min_coverage'])
                     patches = feature_cache.get(cache_key) if feature_cache is not None else None
                     if patches is None:
-                        patches = extract_patch_features(image, name, body.patch_size)
+                        patches = extract_model_features(image, name, body.patch_size, min_coverage=model.config['min_coverage'], feature_set=body.feature_set)
                         if feature_cache is not None:
                             feature_cache[cache_key] = PatchData(patches.values, patches.records)
                 except ValueError as error:
@@ -168,20 +176,28 @@ def _train_pca(body: TrainRequest, job_id=None, feature_cache=None):
         if not values['training'] or len({r['image_id'] for r in records['calibration']}) < 2:
             raise ValueError('Not enough usable training/calibration images after segmentation')
         _progress(job_id, 'Fitting scaler/PCA and calibrating the 99th percentile', done, len(paths))
-        model = PCAAnomalyDetector(body.variance_target, body.patch_size, distance_metric=body.distance_metric)
         model.fit(PatchData(np.vstack(values['training']), records['training']),
                   PatchData(np.vstack(values['calibration']), records['calibration']))
         model_id = uuid.uuid4().hex
         directory = ARTIFACT_ROOT / model_id
-        model.save(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        if not publish:
+            (directory / '.pending').touch()
+        try:
+            model.save(directory)
+        except Exception:
+            # The caller does not yet know this ID if saving fails.
+            shutil.rmtree(directory)
+            raise
         summary = model.summary()
         report = {key: summary[key] for key in ('config', 'features', 'components', 'retained_variance', 'patch_threshold',
                   'plate_threshold', 'training_images', 'calibration_images', 'training_patches', 'calibration_patches', 'explained_variance_ratio')}
-        report.update(model_id=model_id, name='Patch PCA', seed=body.seed, manifest=manifest, skipped=skipped)
+        report.update(model_id=model_id, name='One-class SVM' if model.config.get('model_type') == 'one_class_svm' else 'Patch PCA', seed=body.seed, manifest=manifest, skipped=skipped)
         (directory / 'report.json').write_text(json.dumps(report))
-        temp = ARTIFACT_ROOT / 'current.tmp'
-        temp.write_text(json.dumps({'model_id': model_id}))
-        temp.replace(ARTIFACT_ROOT / 'current.json')
+        if publish:
+            temp = ARTIFACT_ROOT / 'current.tmp'
+            temp.write_text(json.dumps({'model_id': model_id}))
+            temp.replace(ARTIFACT_ROOT / 'current.json')
         return {'model_id': model_id}
     return train(job_id) if job_id else _submit('train', train)
 
@@ -200,12 +216,14 @@ def _test(directory, path, relative):
     destination.mkdir(parents=True)
     model.export_features(destination / 'features.csv', patches, 'test')
     np.savez_compressed(destination / 'features.npz', raw=patches.values, scores=z, reconstructed=reconstructed, errors=errors)
+    map_min = min(0.0, float(model.train_errors.min()), float(model.cal_errors.min()))
+    map_span = max((model.patch_threshold - map_min) * 2, 1e-8)
     heat = np.zeros(image.shape[:2], np.uint8)
     coverage = np.zeros_like(heat)
     annotated = image.copy()
     for row in result['patches']:
         x0, y0, x1, y1 = [row[key] for key in ('left', 'top', 'right', 'bottom')]
-        heat[y0:y1, x0:x1] = round(min(row['error'] / max(model.patch_threshold * 2, 1e-12), 1) * 255)
+        heat[y0:y1, x0:x1] = round(float(np.clip((row['error'] - map_min) / map_span, 0, 1)) * 255)
         coverage[y0:y1, x0:x1] = 255
         if row['anomalous']:
             cv2.rectangle(annotated, (x0, y0), (x1 - 1, y1 - 1), (30, 30, 240), 2)
@@ -213,7 +231,7 @@ def _test(directory, path, relative):
     colored[(patches.mask == 0) | (coverage == 0)] = 0
     result.update(test_id=test_id, model_id=directory.name, image_id=relative,
                   image=_png(annotated), anomaly_map=_png(colored), coverage_mask=_png(cv2.bitwise_and(coverage, patches.mask)),
-                  map_max=model.patch_threshold * 2,
+                  map_min=map_min, map_max=map_min + map_span,
                   membership='training' if relative in {r['image_id'] for r in model.train_records} else
                   'calibration' if relative in {r['image_id'] for r in model.cal_records} else 'unseen')
     (destination / 'result.json').write_text(json.dumps(result))
@@ -232,6 +250,7 @@ def _evaluate_pca(model_id=None, job_id=None, feature_cache=None):
     paths = [path for path in sorted(root.rglob('*')) if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS]
     def evaluate(job_id):
         rows, skipped = [], []
+        model = _model(str(directory))
         for index, path in enumerate(paths):
             relative = 'metal_plate/test/' + path.relative_to(root).as_posix()
             _progress(job_id, 'Evaluating untouched test images', index, len(paths))
@@ -240,13 +259,12 @@ def _evaluate_pca(model_id=None, job_id=None, feature_cache=None):
                 image = cv2.imread(str(safe))
                 if image is None:
                     raise ValueError('Could not decode image')
-                model = _model(str(directory))
-                if model.config['pipeline_signature'] != pipeline_signature():
+                if model.config['pipeline_signature'] != feature_signature(model.config.get('feature_set', 'lab_sobel')):
                     raise ValueError('Preprocessing changed; retrain this model')
-                cache_key = (relative, model.config['patch_size'])
+                cache_key = (relative, model.config['patch_size'], model.config.get('feature_set', 'lab_sobel'), model.config['min_coverage'])
                 patches = feature_cache.get(cache_key) if feature_cache is not None else None
                 if patches is None:
-                    patches = extract_patch_features(image, relative, model.config['patch_size'], model.config['min_coverage'])
+                    patches = extract_model_features(image, relative, model.config['patch_size'], model.config['min_coverage'], model.config.get('feature_set', 'lab_sobel'))
                     if feature_cache is not None:
                         feature_cache[cache_key] = PatchData(patches.values, patches.records)
                 result, _, _, _ = model.score(patches)
@@ -287,7 +305,7 @@ def train_pca_sweep(body: SweepRequest):
         for index, (patch_size, variance_target, distance_metric) in enumerate(combinations):
             with _lock:
                 _jobs[job_id].update(combination=index + 1, combinations=len(combinations))
-            parameters = dict(patch_size=patch_size, variance_target=variance_target, distance_metric=distance_metric, seed=body.seed)
+            parameters = dict(patch_size=patch_size, variance_target=variance_target, distance_metric=distance_metric, seed=body.seed, feature_set=body.feature_set)
             try:
                 trained = _train_pca(TrainRequest(**parameters), job_id, cache)
                 _evaluate_pca(trained['model_id'], job_id, cache)
@@ -329,7 +347,7 @@ def get_pca_features(model_id: str | None = None, split: Literal['training', 'ca
     subset = raw[offset:offset + limit]
     z, reconstructed, errors = model._project(subset)
     values = {'raw': subset, 'standardized': (subset - model.mean) / model.scale, 'reconstructed': reconstructed, 'pca': z}[view]
-    columns = FEATURE_NAMES if view != 'pca' else [f'PC{i + 1}' for i in range(values.shape[1])]
+    columns = model.feature_names if view != 'pca' else [f'PC{i + 1}' for i in range(values.shape[1])]
     return {'total': len(raw), 'columns': columns, 'rows': [{'record': row, 'values': values[i].tolist(), 'error': float(errors[i])}
              for i, row in enumerate(records[offset:offset + limit])]}
 
@@ -354,3 +372,17 @@ def download_pca_features(file: Literal['training', 'calibration', 'components',
     if not path.exists():
         raise HTTPException(404, 'Run the relevant model operation first')
     return FileResponse(path, media_type='text/csv', filename=path.name)
+
+
+def get_model_projection(image_path: str, model_id: str):
+    directory = _directory(model_id)
+    from .os_helpers import image_path as resolve_image_path
+    path = resolve_image_path(image_path)
+    image = cv2.imread(str(path))
+    if image is None:
+        raise HTTPException(422, 'Could not decode image')
+    try:
+        result, _, _, _, _ = _model(str(directory)).test_image(image, image_path)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    return {**result, 'model_id': model_id, 'image_id': image_path}

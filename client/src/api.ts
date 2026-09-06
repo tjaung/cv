@@ -86,6 +86,7 @@ export async function getPreprocessedImage(
   glareCutoff = 220,
   surroundingRadius = 5,
   blendWidth = 3,
+  contrastFactor = 1.5,
 ): Promise<{ blob: Blob; plateFound: boolean; threshold: number | null }> {
   const query = new URLSearchParams({
     image_path: imagePath,
@@ -94,6 +95,7 @@ export async function getPreprocessedImage(
     glare_cutoff: String(glareCutoff),
     surrounding_radius: String(surroundingRadius),
     blend_width: String(blendWidth),
+    contrast_factor: String(contrastFactor),
   })
   if (step !== undefined) query.set('step', String(step))
   const response = await request(`/preprocessing/pipeline/?${query}`, signal)
@@ -105,7 +107,7 @@ export async function getPreprocessedImage(
 export type FeatureSource = 'original' | 'preprocessed'
 export type FeatureSplit = 'all' | 'train' | 'test'
 export type LabChannel = 'L' | 'a' | 'b'
-export type HistogramChannel = LabChannel | 'H' | 'S' | 'V' | 'magnitude' | 'orientation' | 'lbp'
+export type HistogramChannel = LabChannel | 'H' | 'S' | 'V' | 'magnitude' | 'orientation' | 'lbp' | 'hog' | 'frangi_dark' | 'frangi_bright'
 export interface FeatureMap {
   name: string
   range: [number, number]
@@ -128,6 +130,7 @@ export interface ImageFeatures {
   source: FeatureSource
   width: number
   height: number
+  hog: { image: string; bounds: number[]; descriptor: number[]; cells: number[][][]; histogram: number[]; valid_pixels: number }
   lbp: LBPFeatures
   plate_pixels: number
   image: string
@@ -159,6 +162,7 @@ export interface PCAPoint { image_id: string; patch_id: number; scores: number[]
 export interface PCATest {
   model_id: string; test_id: string; image_id: string; prediction: 'GOOD' | 'BAD'; plate_score: number
   patch_threshold: number; plate_threshold: number; anomalous_patches: number; membership: string
+  map_min?: number
   image: string; anomaly_map: string; coverage_mask: string; map_max: number
   patches: (PCAPatchRecord & { scores: number[]; error: number; anomalous: boolean; nearest_distance: number; mahalanobis: number; nearest_patch: PCAPatchRecord })[]
 }
@@ -174,7 +178,7 @@ export interface PCAReport {
   patch_threshold: number; plate_threshold: number
   explained_variance_ratio: number[]
   compatible?: boolean
-  config: { distance_metric?: string; patch_size: number; variance_target: number; quantile: number; source: string }
+  config: { pipeline_signature?: string; feature_set?: string; model_type?: string; kernel?: string; nu?: number; gamma?: string | number; support_vectors?: number; distance_metric?: string; patch_size: number; variance_target: number; quantile: number; source: string }
   skipped: { image_id: string; reason: string }[]
   evaluation?: PCAEvaluation | null
 }
@@ -184,23 +188,23 @@ export interface PCAModel extends PCAReport {
   training_errors: number[]; calibration_errors: number[]; training_points: PCAPoint[]; calibration_points: PCAPoint[]
 }
 export interface ModelJob {
-  job_id: string; kind: 'train' | 'test' | 'evaluate' | 'sweep' | 'evaluate_all'; status: 'queued' | 'running' | 'complete' | 'failed'
-  combination?: number; combinations?: number
+  job_id: string; kind: 'train' | 'test' | 'evaluate' | 'sweep' | 'evaluate_all' | 'svm_grid' | 'retrain_all'; status: 'queued' | 'running' | 'complete' | 'failed'
+  combination?: number; combinations?: number; completed?: number; failed?: number; workers?: number
   phase: string; done: number; total: number; error?: string
   result?: PCATest | PCAEvaluation | { model_id: string } | { model_ids: string[]; failures: { error: string }[] }
 }
 export interface PCAFeaturePage { total: number; columns: string[]; rows: { record: PCAPatchRecord; error: number; values: number[] }[] }
-export async function getModels(): Promise<{ models: PCAReport[]; active_job: ModelJob | null }> {
+export async function getModels(): Promise<{ models: PCAReport[]; history: (PCAReport & { archived_at: string })[]; retrain_configurations: number; active_job: ModelJob | null }> {
   return (await request('/models/')).json()
 }
-export async function getPCAModel(modelId: string): Promise<PCAModel> {
-  return (await request(`/models/pca/?model_id=${encode(modelId)}`)).json()
+export async function getPCAModel(modelId: string, signal?: AbortSignal): Promise<PCAModel> {
+  return (await request(`/models/pca/?model_id=${encode(modelId)}`, signal)).json()
 }
 export async function getModelJob(jobId: string, signal?: AbortSignal): Promise<ModelJob> {
   return (await request(`/models/jobs/${encode(jobId)}`, signal)).json()
 }
 export async function startPCAJob(kind: ModelJob['kind'], body: object = {}, modelId?: string): Promise<{ job_id: string }> {
-  const response = await fetch(`${API_BASE_URL}/models/pca/${kind}/${modelId ? `?model_id=${encode(modelId)}` : ''}`, {
+  const response = await fetch(`${API_BASE_URL}/models/${kind === 'retrain_all' ? 'retrain_all' : kind === 'svm_grid' ? 'one_class_svm/grid' : `pca/${kind}`}/${modelId ? `?model_id=${encode(modelId)}` : ''}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   })
   if (!response.ok) {
@@ -218,4 +222,14 @@ export function getPCADownloadUrl(modelId: string, file: string, testId?: string
   const query = new URLSearchParams({ model_id: modelId, file })
   if (testId) query.set('test_id', testId)
   return `${API_BASE_URL}/models/pca/download/?${query}`
+}
+
+export function getModelHistoryUrl(modelId: string): string {
+  return `${API_BASE_URL}/models/history/${encode(modelId)}`
+}
+
+export type PCAProjection = Pick<PCATest, 'model_id' | 'image_id' | 'prediction' | 'plate_score' | 'patch_threshold' | 'plate_threshold' | 'anomalous_patches' | 'patches'>
+export async function getModelProjection(modelId: string, imagePath: string, signal?: AbortSignal): Promise<PCAProjection> {
+  const query = new URLSearchParams({ model_id: modelId, image_path: imagePath })
+  return (await request(`/models/projection/?${query}`, signal)).json()
 }
