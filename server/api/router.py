@@ -1,9 +1,13 @@
 from fastapi import APIRouter, Response
 
+from .features import get_features, get_feature_histograms
 from .api import get_image, get_image_sets, get_images, get_test_ground_truth
 from .preprocessing import get_preprocessing_steps, run_preprocessing_pipeline
 
 api_router = APIRouter()
+
+api_router.add_api_route('/features/', get_features, methods=['GET'], tags=['Features'])
+api_router.add_api_route('/features/histograms/', get_feature_histograms, methods=['GET'], tags=['Features'])
 
 api_router.add_api_route('/preprocessing/steps/', get_preprocessing_steps, methods=['GET'], tags=['Preprocessing'])
 api_router.add_api_route(

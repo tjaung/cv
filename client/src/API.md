@@ -53,3 +53,26 @@ The API helper still accepts these parameters for programmatic use and returns
 
 Dataset comparisons use a show/hide checkbox with a 50% ground-truth overlay
 in grid and single-image views.
+
+## Features tab
+
+`getFeatures(imagePath, source, signal?)` requests LAB and Sobel maps and sampled
+matrix values. `getFeatureHistograms(source, split, signal?)` requests normalized
+class distributions. The source switch updates both sections. Preprocessed
+features use the repaired color plate; both modes exclude the same background.
+The tab provides heatmap/grayscale views, matrix inspection, previous/next image
+selection, and three overlaid LAB plots with class visibility checkboxes.
+Use Test only to avoid pooling training good images with test defect images.
+
+Class comparison now includes LAB, HSV, and Sobel magnitude/orientation plots
+under one shared legend, source toggle, and split selection. The summary table
+shows mean Sobel strength, strong-edge fraction (≥10), and hue-eligible pixels.
+Orientation is weighted by magnitude and unsigned (0–180°); hue is circular
+(0–360°) and excludes near-gray/near-black pixels. Empty channels have zero curves.
+
+LBP adds a code image with a labeled bounding-box grid, one whole-plate histogram,
+and 16 regional histograms for the selected image. Clicking a regional card
+highlights its position. Class comparisons can switch between whole-plate and
+4×4 regional LBP overlays using the existing class/source/split controls. Every
+LBP plot uses the same ten categories and 0–100% vertical scale. Narrow screens
+scroll the regional grids horizontally to preserve their 4×4 spatial layout.

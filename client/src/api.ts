@@ -101,3 +101,53 @@ export async function getPreprocessedImage(
   return { blob: await response.blob(), plateFound: response.headers.get('X-Plate-Found') !== 'false',
     threshold: thresholdHeader === null ? null : Number(thresholdHeader) }
 }
+
+export type FeatureSource = 'original' | 'preprocessed'
+export type FeatureSplit = 'all' | 'train' | 'test'
+export type LabChannel = 'L' | 'a' | 'b'
+export type HistogramChannel = LabChannel | 'H' | 'S' | 'V' | 'magnitude' | 'orientation' | 'lbp'
+export interface FeatureMap {
+  name: string
+  range: [number, number]
+  palette: 'sequential' | 'diverging' | 'cyclic'
+  heatmap: string
+  transformed: string
+  matrix: (number | null)[][]
+  x: number[]
+  y: number[]
+  stats: { min: number; max: number; mean: number } | null
+}
+export interface LBPDistribution { counts: number[]; pixels: number; histogram: number[] }
+export interface LBPFeatures extends LBPDistribution {
+  image: string
+  bounds: [number, number, number, number]
+  regions: (LBPDistribution & { row: number; col: number; bounds: [number, number, number, number] })[]
+}
+export interface ImageFeatures {
+  name: string
+  source: FeatureSource
+  width: number
+  height: number
+  lbp: LBPFeatures
+  plate_pixels: number
+  image: string
+  mask: string
+  maps: FeatureMap[]
+  histograms: Record<LabChannel, { counts: number[]; edges: number[] }>
+}
+export interface FeatureHistograms {
+  source: FeatureSource
+  split: FeatureSplit
+  weighting: string
+  edges: Record<HistogramChannel, number[]>
+  groups: { name: string; images: number; pixels: number; splits: Record<string, number>; histograms: Record<HistogramChannel, number[]>; totals: Record<HistogramChannel, number>; interior_pixels: number; lbp_regions: { pixels: number; histogram: number[] }[]; sobel_summary: { mean_magnitude: number | null; strong_edge_fraction: number | null } }[]
+  skipped: { path: string; reason: string }[]
+}
+export async function getFeatures(imagePath: string, source: FeatureSource, signal?: AbortSignal): Promise<ImageFeatures> {
+  const query = new URLSearchParams({ image_path: imagePath, source })
+  return (await request(`/features/?${query}`, signal)).json()
+}
+export async function getFeatureHistograms(source: FeatureSource, split: FeatureSplit, signal?: AbortSignal): Promise<FeatureHistograms> {
+  const query = new URLSearchParams({ source, split })
+  return (await request(`/features/histograms/?${query}`, signal)).json()
+}

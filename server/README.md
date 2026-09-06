@@ -99,3 +99,50 @@ package. Algorithms live in `CV/preprocessing`, outside the server. Reinstall
 the package when creating a new Python environment; source edits take effect
 without reinstalling. With Uvicorn started inside `server`, use `--reload-dir ..`
 to also watch changes to `CV`.
+
+## Features
+
+- `GET /features/?image_path=metal_plate/test/scratches/000.png&source=original`
+  returns LAB and Sobel heatmaps, scaled grayscale transforms, source/mask PNG
+  data URLs, full-resolution statistics, and sampled matrices with original
+  x/y coordinates. `matrix_size` (8–128, default 64) limits the longest matrix
+  dimension; previews are limited to 512 pixels. Feature extraction itself uses
+  full-resolution images. Null matrix entries mean excluded/undefined values.
+- `GET /features/histograms/?source=original&split=all&bins=64` returns separate
+  normalized LAB, HSV, and Sobel histograms for good and each defect folder in `metal_plate`.
+  `split` accepts `all`, `train`, or `test`; `bins` accepts 8–128.
+
+Both endpoints accept `source=original|preprocessed`. Preprocessed means the
+repaired color plate after boundary blending, before grayscale blur/CLAHE/Canny.
+Both modes use the same extracted plate ROI for features/statistics, including
+original mode, to exclude background consistently. Sobel excludes one extra
+pixel at the mask boundary and undefined directions. Preview scales are fixed
+across images; signed channels use blue-white-red and direction uses a cyclic map.
+
+Histograms pool eligible pixels or gradient weights per class, then normalize
+each channel by its own total; nonempty channels sum to one. Good includes both train/good and test/good when
+split=all; defect groups use their folder names. Larger plates carry more weight.
+These are whole-plate, not ground-truth defect-only distributions. Image/pixel
+counts and skipped unreadable or empty-mask images are reported. Per-image
+histograms are cached by resolved path, file timestamp/size, source, and bin count;
+restart the server after changing preprocessing code (or use Uvicorn reload).
+
+Run endpoint checks with `venv/bin/python -m unittest discover -s server/tests`.
+
+The histogram endpoint also includes H/S/V, Sobel `magnitude`, and unsigned
+`orientation` in `edges` and each group's `histograms`. `totals` reports the
+eligible count or summed gradient weight for each channel. Hue excludes S<5%
+or V<5%; Sobel uses the plate mask inset by one pixel. Each nonempty histogram
+is normalized by its own total; empty channels contain zeros. `pixels` still
+reports the full plate count and `interior_pixels` reports the Sobel ROI count.
+`sobel_summary` contains pixel-pooled mean magnitude and the fraction with
+magnitude ≥10 (3×3 Sobel scaled by 1/8). These are descriptive measurements,
+not defect predictions. Rotation and whole-plate pooling affect interpretation.
+
+LBP is also returned by both feature endpoints. `/features/` includes `lbp`:
+a nearest-neighbor preview of uniform codes 0–9 scaled to grayscale, whole-plate
+counts/normalized histogram/pixel count, and 16 regions with bounds and counts.
+`/features/histograms/` adds the `lbp` channel (always ten categorical bins,
+independent of `bins`) and each class's `lbp_regions` (16 pooled, independently
+normalized histograms and pixel counts). Neighborhoods crossing background
+are excluded. Regional tiles follow each image's unaligned plate bounding box.
