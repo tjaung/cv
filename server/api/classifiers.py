@@ -301,7 +301,7 @@ def get_classifier_curves(run_id: str, model_id: str):
 def train_classifier_curves(body: CurveRequest):
     directory = _curve_directory(body.run_id, body.model_id)
     def run(job_id):
-        from CV.models.classifiers.learning_curves import learning_curves
+        from CV.models.learning_curves import learning_curves
         summary = json.loads((directory / 'summary.json').read_text())
         split = json.loads((directory / 'split.json').read_text())
         labels = np.array([s['label'] for s in summary['train']])

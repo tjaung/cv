@@ -412,3 +412,58 @@ defect classes. This is a feature-omission explanation, not local defect
 classification, segmentation, or ground truth. It is computed on request and
 does not refit or overwrite the classifier. The random-review prediction table
 also selects which model's patch explanation to inspect.
+
+### CNN / ResNet-18
+
+The CNN tab uses these routes:
+
+- `GET /cnn/`: trained runs, saved train/test metrics and active job.
+- `POST /cnn/train/`: `{ "epochs": 5, "batch_size": 16, "learning_rate": 0.0001, "seed": 42 }`.
+- `POST /cnn/test/`: `{ "run_id": "..." }`; evaluates the saved 20% holdout.
+- `GET /cnn/weights/?run_id=...`: first convolution filters, final classifier
+  weights and per-layer weight statistics.
+- `GET /cnn/predictions/?run_id=...`: held-out predictions and softmax scores.
+- `GET /cnn/inspect/?run_id=...&image_index=0`: exact transformed segmented
+  input, class activation overlay, 512 pooled features and eight active channels.
+- `POST /cnn/save/`: `{ "run_id": "..." }`; retains the selected checkpoint.
+
+Train/test requests return a job ID; poll `/models/jobs/{job_id}`. Training uses
+ImageNet weights (downloaded on first use), fine-tunes all layers, and evaluates
+training metrics without using holdout data. Testing uses the saved split and
+checks image hashes and preprocessing compatibility. The torch dependencies are
+optional: `pip install -e '.[cnn]'` from the project root.
+
+Results and CSVs live in `CV/results/data/cnn/<run_id>/`; temporary checkpoints
+live in `artifacts/cnn/<run_id>/`. Save model copies a checkpoint to
+`CV/results/models/cnn/<run_id>/`. Test image/activation snapshots and learned
+weight views remain usable without checkpoints. Re-testing requires a retained
+checkpoint and unchanged inputs. No training starts just by opening the tab.
+
+CNN training also accepts `"variant": "defect_weighted"` (default: `"standard"`).
+This creates a separate ResNet run with good=1 and each defect=2 cross-entropy
+weights. The summary/checkpoint stores the variant and ordered class weights.
+Evaluation metrics remain unweighted; the training loss curve is weighted for
+this variant. The CNN tab's variant selector chooses which version to train.
+
+CNN `variant: "patch"` trains a binary patch ResNet with `patch_size: 64`
+(default, 16–256), half-patch stride and 50% minimum plate coverage. It uses
+pixel masks for patch labels after the image-level train/test split. Missing
+annotation masks are errors. The same train/test/inspection endpoints return
+binary image metrics, `patch_metrics`, and cached localized patch overlays.
+Inspection responses include `patches` with coordinates, target, score and
+anomalous flag. Image classification uses max patch score >= 0.5. These binary
+metrics should not be interpreted as four-class defect-type classification.
+
+CNN `variant: "patch_multiclass"` adds four-class patch training with the same
+patch settings. Ground-truth-positive patches inherit the image's defect type;
+clean regions are good. Patch predictions use argmax. With at most two bad patches, the image is good
+only if mean good probability across all patches is strictly highest. Otherwise
+the strongest non-good patch decides (good if all patches predict good).
+Inspection patch rows include `prediction`, `actual`, and four `probabilities`.
+
+CNN training accepts `num_workers` (0–8, default 2). The CNN tab exposes this as
+Data workers. Each job uses a temporary segmented-plate/mask cache and spawned
+persistent data-loading workers. Caches are shared through read-only memory maps,
+then workers are stopped and temporary files removed on success or failure.
+Testing uses the run's stored worker setting (2 for older runs). Set 0 for a
+synchronous loader if the local environment cannot start worker processes.

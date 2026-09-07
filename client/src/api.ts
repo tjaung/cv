@@ -188,7 +188,7 @@ export interface PCAModel extends PCAReport {
   training_errors: number[]; calibration_errors: number[]; training_points: PCAPoint[]; calibration_points: PCAPoint[]
 }
 export interface ModelJob {
-  job_id: string; kind: 'classifier_curves' | 'classifiers' | 'train' | 'test' | 'evaluate' | 'sweep' | 'evaluate_all' | 'svm_grid' | 'retrain_all'; status: 'queued' | 'running' | 'complete' | 'failed'
+  job_id: string; kind: 'cnn_train' | 'cnn_test' | 'classifier_curves' | 'classifiers' | 'train' | 'test' | 'evaluate' | 'sweep' | 'evaluate_all' | 'svm_grid' | 'retrain_all'; status: 'queued' | 'running' | 'complete' | 'failed'
   combination?: number; combinations?: number; completed?: number; failed?: number; workers?: number
   phase: string; done: number; total: number; error?: string
   result?: PCATest | PCAEvaluation | { model_id: string } | { model_ids: string[]; failures: { error: string }[] }
@@ -247,4 +247,49 @@ export async function classifierRequest<T>(path = '', body?: object, signal?: Ab
 export async function saveResultModel(family: 'anomaly' | 'classifiers', modelId: string, runId?: string): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/results/save_model/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ family, model_id: modelId, run_id: runId }) })
   if (!response.ok) { const error = await response.json(); throw new Error(typeof error.detail === 'string' ? error.detail : 'Could not save model') }
+}
+
+export interface CNNMetrics {
+  patch_metrics?: CNNMetrics
+  accuracy: number; loss: number
+  report: Record<string, { precision: number; recall: number; 'f1-score': number; support: number } | number>
+  confusion_matrix: number[][]
+}
+export interface CNNRun {
+  run_id: string; created_at: string; class_names: string[]
+  config: { epochs: number; batch_size: number; learning_rate: number; seed: number; num_workers?: number; variant?: 'standard' | 'defect_weighted' | 'patch' | 'patch_multiclass'; patch_size?: number }
+  class_weights?: number[]
+  history: { epoch: number; loss: number; accuracy: number }[]
+  split_counts: { train: Record<string, number>; test: Record<string, number> }
+  training: CNNMetrics; test: CNNMetrics | null; model_saved: boolean; model_available: boolean
+}
+export interface CNNPrediction { path: string; actual: string; prediction: string; correct: boolean; probabilities: number[] }
+export interface CNNInspection extends CNNPrediction {
+  patches?: { left: number; top: number; right: number; bottom: number; score: number; anomalous: boolean; target: number; prediction?: string; actual?: string; probabilities?: number[] }[]
+  input_image: string; activation_image: string; features: number[]
+  feature_maps: { channel: number; activation: number; image: string }[]
+}
+export interface CNNWeights {
+  conv1_filters: string; conv1_scale: number; classifier_weights: number[][]; classifier_bias: number[]
+  layers: { name: string; parameters: number; mean: number; std: number }[]
+}
+export async function getCNN(signal?: AbortSignal): Promise<{ runs: CNNRun[]; active_job: ModelJob | null }> {
+  return (await request('/cnn/', signal)).json()
+}
+export async function getCNNWeights(id: string, signal?: AbortSignal): Promise<CNNWeights> {
+  return (await request(`/cnn/weights/?run_id=${encode(id)}`, signal)).json()
+}
+export async function getCNNPredictions(id: string, signal?: AbortSignal): Promise<CNNPrediction[]> {
+  return (await request(`/cnn/predictions/?run_id=${encode(id)}`, signal)).json()
+}
+export async function getCNNInspection(id: string, index: number, signal?: AbortSignal): Promise<CNNInspection> {
+  return (await request(`/cnn/inspect/?run_id=${encode(id)}&image_index=${index}`, signal)).json()
+}
+export async function cnnAction(action: 'train' | 'test' | 'save', body: object): Promise<{ job_id?: string; saved?: boolean }> {
+  const response = await fetch(`${API_BASE_URL}/cnn/${action}/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  if (!response.ok) {
+    const value = await response.json().catch(() => null)
+    throw new Error(typeof value?.detail === 'string' ? value.detail : `CNN request failed (${response.status})`)
+  }
+  return response.json()
 }

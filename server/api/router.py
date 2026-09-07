@@ -1,4 +1,5 @@
 from .result_store import save_selected_model
+from .cnn import get_cnn, train_cnn, test_cnn, cnn_weights, cnn_predictions, cnn_inspect, save_cnn
 from .classifiers import get_classifier_patch_explanation
 from .classifiers import get_classifier_curves, train_classifier_curves
 from .classifiers import list_classifiers, train_classifiers, inspect_classifier, classify_review_image, get_classifier_training_metrics
@@ -12,6 +13,14 @@ from .api import get_image, get_image_sets, get_images, get_test_ground_truth
 from .preprocessing import get_preprocessing_steps, run_preprocessing_pipeline
 
 api_router = APIRouter()
+
+api_router.add_api_route('/cnn/', get_cnn, methods=['GET'], tags=['CNN'])
+api_router.add_api_route('/cnn/train/', train_cnn, methods=['POST'], tags=['CNN'])
+api_router.add_api_route('/cnn/test/', test_cnn, methods=['POST'], tags=['CNN'])
+api_router.add_api_route('/cnn/weights/', cnn_weights, methods=['GET'], tags=['CNN'])
+api_router.add_api_route('/cnn/predictions/', cnn_predictions, methods=['GET'], tags=['CNN'])
+api_router.add_api_route('/cnn/inspect/', cnn_inspect, methods=['GET'], tags=['CNN'])
+api_router.add_api_route('/cnn/save/', save_cnn, methods=['POST'], tags=['CNN'])
 
 api_router.add_api_route('/models/one_class_svm/grid/', train_svm_grid, methods=['POST'], tags=['Models'])
 api_router.add_api_route('/models/one_class_svm/', get_pca_model, methods=['GET'], tags=['Models'])
