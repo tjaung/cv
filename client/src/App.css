@@ -74,7 +74,7 @@ h2 { font-size: 14px; font-weight: 600; }
 .app-tabs a:hover { background: #eaf1ed; }
 a:focus-visible { outline: 3px solid #278568; outline-offset: -3px; }
 .page-intro { margin-bottom: 24px; max-width: 900px; }
-.page-intro.preprocessing-intro { max-width: none; width: 100%; }
+.page-intro.preprocessing-intro, .page-intro.features-intro { max-width: none; width: 100%; }
 .page-intro h2 { font-size: 25px; letter-spacing: -.5px; margin-bottom: 10px; }
 .page-intro > p:not(.eyebrow) { color: #718079; font-size: 14px; margin-top: 8px; }
 h3 { font-size: 14px; font-weight: 600; margin: 0; }

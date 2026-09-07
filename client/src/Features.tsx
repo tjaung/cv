@@ -1,4 +1,5 @@
 import HOGView from './HOGView'
+import FeaturesWriteup from './FeaturesWriteup'
 import { useEffect, useState } from 'react'
 import LBPView from './LBPView'
 import { getFeatures, getFeatureHistograms, getImages } from './api'
@@ -209,8 +210,8 @@ export default function Features() {
   }, [images, view])
   const index = images.indexOf(selected)
   return <section>
-    <div className="page-intro"><p className="eyebrow">METAL PLATE · FEATURE EXPLORATION</p><h2>Features</h2>
-      <p>Explore CIELAB, Sobel gradients, HOG shape descriptors, Frangi ridges, and LBP texture. Compare original color values with the final contrast-enhanced color plate from the complete preprocessing pipeline. Both modes use the same extracted plate region to exclude background.</p>
+    <div className="page-intro features-intro"><p className="eyebrow">METAL PLATE · FEATURE EXPLORATION</p><h2>Features</h2>
+      <FeaturesWriteup />
     </div>
     <div className="panel feature-toolbar"><div className="view-switch" aria-label="Feature source">{(['original', 'preprocessed'] as const).map((value) => <button key={value} aria-pressed={source === value} onClick={() => setSource(value)}>{value === 'original' ? 'Original images' : 'Preprocessed plates'}</button>)}</div>
       <div className="view-switch" aria-label="Feature view"><button aria-pressed={view === 'single'} onClick={() => setView('single')}>Single image</button><button aria-pressed={view === 'grid'} onClick={() => setView('grid')}>Grid view</button></div>

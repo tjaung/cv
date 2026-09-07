@@ -138,7 +138,7 @@ export default function Preprocessing() {
             {([['segmentation', 'Segmentation'], ['full', 'Full pipeline']] as const).map(([value, label]) => <button key={value} id={`pipeline-tab-${value}`} role="tab" aria-selected={pipeline === value} aria-controls="pipeline-preview" onClick={() => setPipeline(value)}>{label}</button>)}
           </div>
           <p className="step-description">{pipeline === 'segmentation'
-            ? 'Build a mask from the grayscale branch, then apply it to the normalized color image. Whole-image CNNs use the segmented plate; patch CNNs extract overlapping 64×64 regions with stride 32. Patch boxes are input regions, not predictions.'
+            ? 'Build a mask from the grayscale branch, then apply it to the original color image. Whole-image CNNs use the segmented plate; patch CNNs extract overlapping 64×64 regions with stride 32. Patch boxes are input regions, not predictions.'
             : 'Continue after segmentation with glare detection, surrounding-color fill, boundary blending, plate blur, CLAHE and final contrast. The final color plate feeds LAB, Sobel, HOG and Frangi features for classical anomaly detectors and classifiers.'}</p>
           <div className="pipeline-steps" aria-label="Preprocessing steps">
             {dataset.steps[pipeline].map((item) => <button key={item.number} aria-pressed={step === item.number} title={item.description} onClick={() => setStep(item.number)}>
