@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
+import PreprocessingWriteup from './PreprocessingWriteup'
 import { getImages, getPreprocessedImage, getPreprocessingSteps } from './api'
-import type { PreprocessingStep } from './api'
+import type { PreprocessingStep, PreprocessingPipeline } from './api'
 
 type Split = 'train' | 'test'
 interface PlateImage { path: string; name: string; split: Split }
-interface Dataset { images: PlateImage[]; steps: PreprocessingStep[] }
+interface Dataset { images: PlateImage[]; steps: Record<PreprocessingPipeline, PreprocessingStep[]> }
 
-function StageImage({ image, step, allowBorderTouching, thresholdOffset, glareCutoff, surroundingRadius, blendWidth, thumbnail = false }: {
+function StageImage({ image, step, pipeline, allowBorderTouching, thresholdOffset, glareCutoff, surroundingRadius, blendWidth, thumbnail = false }: {
   image: PlateImage
   step: number
+  pipeline: PreprocessingPipeline
   allowBorderTouching: boolean
   glareCutoff: number
   surroundingRadius: number
@@ -29,7 +31,7 @@ function StageImage({ image, step, allowBorderTouching, thresholdOffset, glareCu
     const load = () => {
       if (started) return
       started = true
-      getPreprocessedImage(image.path, step, allowBorderTouching, controller.signal, thresholdOffset, glareCutoff, surroundingRadius, blendWidth).then((data) => {
+      getPreprocessedImage(image.path, step, allowBorderTouching, controller.signal, thresholdOffset, glareCutoff, surroundingRadius, blendWidth, 1.5, pipeline).then((data) => {
         if (!active) return
         objectUrl = URL.createObjectURL(data.blob)
         setResult({ url: objectUrl, plateFound: data.plateFound, threshold: data.threshold })
@@ -52,7 +54,7 @@ function StageImage({ image, step, allowBorderTouching, thresholdOffset, glareCu
       controller.abort()
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [image.path, step, allowBorderTouching, thumbnail, attempt, thresholdOffset, glareCutoff, surroundingRadius, blendWidth])
+  }, [image.path, step, pipeline, allowBorderTouching, thumbnail, attempt, thresholdOffset, glareCutoff, surroundingRadius, blendWidth])
 
   return <div ref={container} className={`stage-image ${thumbnail ? 'stage-thumbnail' : 'stage-single'}`}>
     {error ? <div className="stage-error"><p>{error}</p>{!thumbnail && <button onClick={() => { setResult(null); setError(''); setAttempt(attempt + 1) }}>Try again</button>}</div>
@@ -70,7 +72,10 @@ export default function Preprocessing() {
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
   const [split, setSplit] = useState<'all' | Split>('all')
-  const [step, setStep] = useState(0)
+  const [pipeline, setPipeline] = useState<PreprocessingPipeline>('segmentation')
+  const [stepChoices, setStepChoices] = useState({ segmentation: 0, full: 0 })
+  const step = stepChoices[pipeline]
+  const setStep = (number: number) => setStepChoices(previous => ({ ...previous, [pipeline]: number }))
   const [selected, setSelected] = useState<string | null>(null)
   const [allowBorderTouching, setAllowBorderTouching] = useState(true)
   const appliedOffset = 20
@@ -80,12 +85,12 @@ export default function Preprocessing() {
 
   useEffect(() => {
     let active = true
-    Promise.all([getImages('metal_plate', 'train'), getImages('metal_plate', 'test'), getPreprocessingSteps()])
-      .then(([train, test, steps]) => {
+    Promise.all([getImages('metal_plate', 'train'), getImages('metal_plate', 'test'), getPreprocessingSteps('segmentation'), getPreprocessingSteps('full')])
+      .then(([train, test, segmentation, full]) => {
         if (!active) return
         const images = (['train', 'test'] as const).flatMap((part) =>
           (part === 'train' ? train : test).map((name) => ({ path: `metal_plate/${part}/${name}`, name, split: part })))
-        setDataset({ images, steps })
+        setDataset({ images, steps: { segmentation, full } })
       }).catch((reason: unknown) => {
         if (active) setError(reason instanceof Error ? reason.message : 'Could not load metal plate images.')
       })
@@ -97,7 +102,7 @@ export default function Preprocessing() {
   const current = images[selectedIndex]
   const previous = selectedIndex > 0 ? images[selectedIndex - 1].path : undefined
   const next = selectedIndex >= 0 ? images[selectedIndex + 1]?.path : undefined
-  const activeStep = dataset?.steps.find((item) => item.number === step)
+  const activeStep = dataset?.steps[pipeline].find((item) => item.number === step)
 
   useEffect(() => {
     if (!selected) return
@@ -114,9 +119,8 @@ export default function Preprocessing() {
   }, [selected, previous, next])
 
   return <section>
-    <div className="page-intro"><p className="eyebrow">METAL PLATE · TRAINING & TEST</p><h2>Preprocessing</h2>
-      <p>Normalize luminance, convert to grayscale, blur a copy, and darken edges using Sobel strength. Separate foreground with ISODATA, then fill enclosed holes using flood fill and apply one dilation followed by one erosion to close small gaps. Extract the plate region, trim its border with three 3×3 erosions, and apply it to the normalized, unblurred color image to preserve surface detail. Glare removal starts from the segmented color plate: grayscale → bright-pixel threshold → surrounding median-color fill → inward boundary blending → grayscale Gaussian blur → CLAHE → 1.5× contrast enhancement. The enhanced luminance is recombined with the repaired color channels; this final color plate feeds all preprocessed features and models.</p>
-      <p>Choose a numbered step to see its result across the grid. The largest foreground region is selected even when connected to the image border; turn off border connections for strict exclusion. Click an image for a closer look; your chosen step stays selected as you browse.</p>
+    <div className="page-intro preprocessing-intro"><p className="eyebrow">METAL PLATE · TRAINING & TEST</p><h2>Preprocessing</h2>
+      <PreprocessingWriteup />
     </div>
     {error ? <div className="panel empty" role="alert"><p>{error}</p><button onClick={() => { setError(''); setAttempt(attempt + 1) }}>Try again</button></div>
       : !dataset ? <p className="panel empty" role="status">Loading metal plate images…</p>
@@ -130,13 +134,20 @@ export default function Preprocessing() {
             </div>
             <label className="cropped-option"><input type="checkbox" checked={allowBorderTouching} onChange={(event) => setAllowBorderTouching(event.target.checked)} /> Allow border-connected regions</label>
           </div>
+          <div className="view-switch" role="tablist" aria-label="Preprocessing pipeline">
+            {([['segmentation', 'Segmentation'], ['full', 'Full pipeline']] as const).map(([value, label]) => <button key={value} id={`pipeline-tab-${value}`} role="tab" aria-selected={pipeline === value} aria-controls="pipeline-preview" onClick={() => setPipeline(value)}>{label}</button>)}
+          </div>
+          <p className="step-description">{pipeline === 'segmentation'
+            ? 'Build a mask from the grayscale branch, then apply it to the normalized color image. Whole-image CNNs use the segmented plate; patch CNNs extract overlapping 64×64 regions with stride 32. Patch boxes are input regions, not predictions.'
+            : 'Continue after segmentation with glare detection, surrounding-color fill, boundary blending, plate blur, CLAHE and final contrast. The final color plate feeds LAB, Sobel, HOG and Frangi features for classical anomaly detectors and classifiers.'}</p>
           <div className="pipeline-steps" aria-label="Preprocessing steps">
-            {dataset.steps.map((item) => <button key={item.number} aria-pressed={step === item.number} title={item.description} onClick={() => setStep(item.number)}>
+            {dataset.steps[pipeline].map((item) => <button key={item.number} aria-pressed={step === item.number} title={item.description} onClick={() => setStep(item.number)}>
               <span className="step-number">{item.number}</span><span>{item.name}</span>
             </button>)}
           </div>
           <p className="step-description" aria-live="polite"><strong>{activeStep?.name}.</strong> {activeStep?.description}</p>
         </div>
+        <div id="pipeline-preview" role="tabpanel" aria-labelledby={`pipeline-tab-${pipeline}`}>
         {current ? <>
           <div className="panel-heading preview-heading"><div><h3>{current.name.split('/').at(-1)}</h3><p className="preview-caption">{current.split} / {current.name} · {selectedIndex + 1} of {images.length}</p></div>
             <div className="view-switch">
@@ -145,7 +156,7 @@ export default function Preprocessing() {
               <button onClick={() => setSelected(null)}>← Back to grid</button>
             </div>
           </div>
-          <StageImage key={`${current.path}:${step}:${allowBorderTouching}:${appliedOffset}:${glareCutoff}:${surroundingRadius}:${blendWidth}`} image={current} step={step} allowBorderTouching={allowBorderTouching} thresholdOffset={appliedOffset} glareCutoff={glareCutoff} surroundingRadius={surroundingRadius} blendWidth={blendWidth} />
+          <StageImage key={`${current.path}:${pipeline}:${step}:${allowBorderTouching}:${appliedOffset}:${glareCutoff}:${surroundingRadius}:${blendWidth}`} image={current} step={step} pipeline={pipeline} allowBorderTouching={allowBorderTouching} thresholdOffset={appliedOffset} glareCutoff={glareCutoff} surroundingRadius={surroundingRadius} blendWidth={blendWidth} />
         </> : images.length === 0 ? <p className="empty">No images in this split.</p>
           : <div className="preprocessing-grid-scroll">
             {(['train', 'test'] as const).filter((part) => split === 'all' || part === split).map((part) => <section key={part} aria-label={`${part === 'train' ? 'Training' : 'Test'} images`}>
@@ -153,13 +164,14 @@ export default function Preprocessing() {
               <ul className="image-grid preprocessing-grid">
                 {images.filter((image) => image.split === part).map((image) => <li key={image.path}>
                   <button className="image-card" aria-label={`View ${image.split}/${image.name}`} onClick={() => setSelected(image.path)}>
-                    <StageImage key={`${image.path}:${step}:${allowBorderTouching}:${appliedOffset}:${glareCutoff}:${surroundingRadius}:${blendWidth}`} image={image} step={step} allowBorderTouching={allowBorderTouching} thresholdOffset={appliedOffset} glareCutoff={glareCutoff} surroundingRadius={surroundingRadius} blendWidth={blendWidth} thumbnail />
+                    <StageImage key={`${image.path}:${pipeline}:${step}:${allowBorderTouching}:${appliedOffset}:${glareCutoff}:${surroundingRadius}:${blendWidth}`} image={image} step={step} pipeline={pipeline} allowBorderTouching={allowBorderTouching} thresholdOffset={appliedOffset} glareCutoff={glareCutoff} surroundingRadius={surroundingRadius} blendWidth={blendWidth} thumbnail />
                     <span className="processed-filename">{image.name.split('/').at(-1)}<small>{image.name.split('/').slice(0, -1).join('/')}</small></span>
                   </button>
                 </li>)}
               </ul>
             </section>)}
           </div>}
+        </div>
       </div>}
   </section>
 }

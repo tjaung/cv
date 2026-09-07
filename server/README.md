@@ -467,3 +467,12 @@ persistent data-loading workers. Caches are shared through read-only memory maps
 then workers are stopped and temporary files removed on success or failure.
 Testing uses the run's stored worker setting (2 for older runs). Set 0 for a
 synchronous loader if the local environment cannot start worker processes.
+
+The preprocessing viewer has separate `segmentation` and `full` pipelines.
+`GET /preprocessing/steps/?pipeline=segmentation` returns stages 0–9, ending
+with a CNN patch-extraction preview (64×64, stride 32, ≥50% plate coverage).
+`pipeline=full` returns the full stages 0–15. Pass the same `pipeline` to
+`/preprocessing/pipeline/`; omitting `step` selects that pipeline's final stage.
+The default pipeline remains `full` for existing clients. Segmentation requests
+never run glare repair, CLAHE or the final contrast stage. Patch boxes indicate
+input regions, not model predictions.

@@ -70,13 +70,15 @@ export interface PreprocessingStep {
   description: string
 }
 
-export async function getPreprocessingSteps(): Promise<PreprocessingStep[]> {
-  const response = await request('/preprocessing/steps/')
+export type PreprocessingPipeline = 'segmentation' | 'full'
+
+export async function getPreprocessingSteps(pipeline: PreprocessingPipeline = 'full'): Promise<PreprocessingStep[]> {
+  const response = await request(`/preprocessing/steps/?pipeline=${pipeline}`)
   const data: { steps: PreprocessingStep[] } = await response.json()
   return data.steps
 }
 
-/** Paths are relative to anomaly_dataset; omitting step returns the final Canny edges. */
+/** Paths are relative to anomaly_dataset; omitting step returns the selected pipeline’s final stage. */
 export async function getPreprocessedImage(
   imagePath: string,
   step?: number,
@@ -87,6 +89,7 @@ export async function getPreprocessedImage(
   surroundingRadius = 5,
   blendWidth = 3,
   contrastFactor = 1.5,
+  pipeline: PreprocessingPipeline = 'full',
 ): Promise<{ blob: Blob; plateFound: boolean; threshold: number | null }> {
   const query = new URLSearchParams({
     image_path: imagePath,
@@ -96,6 +99,7 @@ export async function getPreprocessedImage(
     surrounding_radius: String(surroundingRadius),
     blend_width: String(blendWidth),
     contrast_factor: String(contrastFactor),
+    pipeline,
   })
   if (step !== undefined) query.set('step', String(step))
   const response = await request(`/preprocessing/pipeline/?${query}`, signal)
