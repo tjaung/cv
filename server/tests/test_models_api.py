@@ -1,5 +1,6 @@
 import asyncio
 import json
+import shutil
 from pathlib import Path
 import tempfile
 import time
@@ -49,7 +50,7 @@ class ModelAPITests(unittest.TestCase):
             if label == 'rust':
                 sample[40:100, 40:100] = (20, 50, 160)
             cv2.imwrite(str(path), sample)
-        for target, value in [('server.api.os_helpers.DATASET_ROOT', dataset), ('server.api.models.ARTIFACT_ROOT', root / 'models')]:
+        for target, value in [('server.api.os_helpers.DATASET_ROOT', dataset), ('server.api.models.ARTIFACT_ROOT', root / 'models'), ('server.api.result_store.RESULTS_ROOT', root / 'results')]:
             patcher = patch(target, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -111,6 +112,28 @@ class ModelAPITests(unittest.TestCase):
         self.assertEqual(self.call('/models/pca/', query={'model_id': '../escape'})[0], 400)
         self.assertEqual(self.call('/models/pca/test/', 'POST', body={'image_path': '../escape.png'})[0], 400)
         self.assertEqual(self.call('/models/pca/train/', 'POST', body={'patch_size': 1})[0], 422)
+
+    def test_durable_results_and_selected_model_survive_artifact_deletion(self):
+        from server.api import result_store as results
+        _, job = self.call('/models/pca/train/', 'POST', body={'patch_size': 32})
+        model_id = self.finish(job['job_id'])['model_id']
+        _, job = self.call('/models/pca/evaluate/', 'POST')
+        evaluation = self.finish(job['job_id'])
+        image_path = 'metal_plate/test/rust/000.png'
+        projection = models.get_model_projection(image_path, model_id)
+        detail = models.get_pca_model(model_id)
+        status, saved = self.call('/results/save_model/', 'POST', body={'family': 'anomaly', 'model_id': model_id})
+        self.assertEqual((status, saved), (200, {'saved': True}))
+        shutil.rmtree(models.ARTIFACT_ROOT)
+        models._model.cache_clear()
+        listing = models.get_models()['models']
+        self.assertEqual(len(listing), 1)
+        self.assertTrue(listing[0]['model_saved'])
+        self.assertEqual(listing[0]['evaluation'], evaluation)
+        self.assertEqual(models.get_pca_model(model_id), detail)
+        self.assertEqual(models.get_model_projection(image_path, model_id), projection)
+        self.assertEqual(models._directory(model_id), results.saved_root('anomaly') / model_id)
+        self.assertTrue((results.data_root('anomaly') / model_id / 'predictions.csv').exists())
 
     def test_sweep_keeps_every_run_and_evaluates_each_metric(self):
         status, job = self.call('/models/pca/sweep/', 'POST', body={
@@ -238,7 +261,8 @@ class ModelAPITests(unittest.TestCase):
         self.assertEqual(cleared['removed'], 3)
         self.assertEqual(cleared['configurations'], 2)
         _, listing = self.call('/models/')
-        self.assertEqual(listing['models'], [])
+        self.assertEqual({r['model_id'] for r in listing['models']}, old_ids)
+        self.assertFalse(any(r['model_available'] for r in listing['models']))
         self.assertEqual(len(listing['history']), 3)
         archived_svm = next(r for r in listing['history'] if r['config'].get('model_type') == 'one_class_svm')
         self.assertEqual(archived_svm['evaluation']['images'], 2)
@@ -252,14 +276,16 @@ class ModelAPITests(unittest.TestCase):
         self.assertEqual(len(result['model_ids']), 2)
         self.assertEqual(result['failures'], [])
         _, listing = self.call('/models/')
-        self.assertEqual(len(listing['models']), 2)
-        self.assertTrue(all(r['evaluation']['images'] == 2 for r in listing['models']))
+        self.assertEqual(len(listing['models']), 5)
+        self.assertEqual(sum(r['model_available'] for r in listing['models']), 2)
+        self.assertTrue(all(r['evaluation']['images'] == 2 for r in listing['models'] if r['model_available']))
         previous_ids = set(result['model_ids'])
         _, job = self.call('/models/retrain_all/', 'POST')
         result = self.finish(job['job_id'])
         self.assertEqual(result['failures'], [])
         _, listing = self.call('/models/')
-        self.assertEqual(len(listing['models']), 2)
+        self.assertEqual(len(listing['models']), 7)
+        self.assertEqual(sum(r['model_available'] for r in listing['models']), 2)
         self.assertEqual(len(listing['history']), 5)
         self.assertFalse(any((models.ARTIFACT_ROOT / i).exists() for i in previous_ids))
         retained_ids = {r['model_id'] for r in listing['models']}

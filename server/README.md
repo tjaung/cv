@@ -397,3 +397,18 @@ These are sample-size learning curves, not optimizer/epoch loss histories.
 No held-out test data is used and fitted model artifacts are not replaced.
 Points with any failed fold are marked unavailable. Results are saved beside
 the selected model as `<model_id>-learning-curves.json`.
+
+Patch highlights are available in individual predictions. Anomaly Detection
+uses the selected model's actual `patches[].anomalous` flags and scores; its
+patch threshold is distinct from the image-level decision threshold.
+
+`GET /classifiers/patch_explanation/` takes `run_id`, `model_id`, and
+`image_index` in the combined train+holdout inventory. It verifies that current
+extracted features match the saved run, omits one patch feature vector at a
+time, recomputes pooled mean/std, and measures the drop in predicted-class
+support. Support is a decision score for PCA/SVM, or neighbor vote share for
+KNN. The client highlights up to five positive contributions for predicted
+defect classes. This is a feature-omission explanation, not local defect
+classification, segmentation, or ground truth. It is computed on request and
+does not refit or overwrite the classifier. The random-review prediction table
+also selects which model's patch explanation to inspect.

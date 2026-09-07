@@ -1,3 +1,5 @@
+from .result_store import save_selected_model
+from .classifiers import get_classifier_patch_explanation
 from .classifiers import get_classifier_curves, train_classifier_curves
 from .classifiers import list_classifiers, train_classifiers, inspect_classifier, classify_review_image, get_classifier_training_metrics
 from .model_lifecycle import clear_models, retrain_all_models, download_history
@@ -62,3 +64,7 @@ api_router.add_api_route('/classifiers/training_metrics/', get_classifier_traini
 
 api_router.add_api_route('/classifiers/learning_curves/', get_classifier_curves, methods=['GET'], tags=['Classifiers'])
 api_router.add_api_route('/classifiers/learning_curves/', train_classifier_curves, methods=['POST'], tags=['Classifiers'])
+
+api_router.add_api_route('/classifiers/patch_explanation/', get_classifier_patch_explanation, methods=['GET'], tags=['Classifiers'])
+
+api_router.add_api_route('/results/save_model/', save_selected_model, methods=['POST'], tags=['Results'])

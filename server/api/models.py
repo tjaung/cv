@@ -24,6 +24,8 @@ from CV.models.feature_sets import extract_model_features, feature_signature
 from .os_helpers import folder_path, image_path, IMAGE_EXTENSIONS
 from .features import _png
 
+from . import result_store as results
+
 ARTIFACT_ROOT = Path(__file__).resolve().parents[2] / 'artifacts/models/pca'
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='pca')
 _jobs = {}
@@ -59,6 +61,8 @@ def _directory(model_id=None):
     if len(model_id) != 32 or any(c not in '0123456789abcdef' for c in model_id):
         raise HTTPException(400, 'Invalid model ID')
     directory = ARTIFACT_ROOT / model_id
+    if not (directory / 'model.json').exists():
+        directory = results.saved_root('anomaly') / model_id
     if not (directory / 'model.json').exists():
         raise HTTPException(404, 'Model not found')
     return directory
@@ -120,10 +124,27 @@ def get_models():
             report['compatible'] = report['config'].get('pipeline_signature') == feature_signature(report['config'].get('feature_set', 'lab_sobel'))
             reports.append({**report, 'evaluation': evaluation})
         from .model_lifecycle import catalog, history
+        seen = {r['model_id'] for r in reports}
+        for path in results.data_root('anomaly').glob('*/report.json'):
+            if path.parent.name in seen or (ARTIFACT_ROOT / path.parent.name / '.pending').exists():
+                continue
+            report = results.read_json(path)
+            evaluation = path.parent / 'evaluation.json'
+            reports.append({**report, 'evaluation': results.read_json(evaluation) if evaluation.exists() else None, 'compatible': False})
+        for report in reports:
+            model_id = report['model_id']
+            report['results_saved'] = (results.data_root('anomaly') / model_id / 'detail.json.gz').exists()
+            report['model_saved'] = (results.saved_root('anomaly') / model_id / 'model.npz').exists()
+            report['model_available'] = report['model_saved'] or (ARTIFACT_ROOT / model_id / 'model.npz').exists()
         return {'models': reports, 'active_job': active, 'history': history(), 'retrain_configurations': len(catalog())}
 
 
 def get_pca_model(model_id: str | None = None):
+    if model_id:
+        results.validate_id(model_id)
+        snapshot = results.data_root('anomaly') / model_id / 'detail.json.gz'
+        if snapshot.exists():
+            return results.read_json(snapshot)
     directory = _directory(model_id)
     model = _model(str(directory))
     return {**model.summary(), **json.loads((directory / 'report.json').read_text()),
@@ -194,6 +215,7 @@ def _train_pca(body: TrainRequest, job_id=None, feature_cache=None, model_factor
                   'plate_threshold', 'training_images', 'calibration_images', 'training_patches', 'calibration_patches', 'explained_variance_ratio')}
         report.update(model_id=model_id, name='One-class SVM' if model.config.get('model_type') == 'one_class_svm' else 'Patch PCA', seed=body.seed, manifest=manifest, skipped=skipped)
         (directory / 'report.json').write_text(json.dumps(report))
+        results.export_anomaly_model(model, report)
         if publish:
             temp = ARTIFACT_ROOT / 'current.tmp'
             temp.write_text(json.dumps({'model_id': model_id}))
@@ -268,6 +290,7 @@ def _evaluate_pca(model_id=None, job_id=None, feature_cache=None):
                     if feature_cache is not None:
                         feature_cache[cache_key] = PatchData(patches.values, patches.records)
                 result, _, _, _ = model.score(patches)
+                results.export_anomaly_projection(directory.name, relative, result)
                 label = path.relative_to(root).parts[0]
                 rows.append({'image_id': relative, 'label': label, 'actual': 'GOOD' if label == 'good' else 'BAD',
                              'prediction': result['prediction'], 'score': result['plate_score'],
@@ -290,6 +313,7 @@ def _evaluate_pca(model_id=None, job_id=None, feature_cache=None):
             writer = csv.DictWriter(stream, fieldnames=['image_id', 'label', 'actual', 'prediction', 'score', 'patches', 'anomalous_patches'])
             writer.writeheader()
             writer.writerows(rows)
+        results.export_anomaly_evaluation(directory.name, result)
         return result
     return evaluate(job_id) if job_id else _submit('evaluate', evaluate)
 
@@ -375,6 +399,10 @@ def download_pca_features(file: Literal['training', 'calibration', 'components',
 
 
 def get_model_projection(image_path: str, model_id: str):
+    results.validate_id(model_id)
+    snapshot = results.anomaly_projection_path(model_id, image_path)
+    if snapshot.exists():
+        return results.read_json(snapshot)
     directory = _directory(model_id)
     from .os_helpers import image_path as resolve_image_path
     path = resolve_image_path(image_path)
@@ -385,4 +413,6 @@ def get_model_projection(image_path: str, model_id: str):
         result, _, _, _, _ = _model(str(directory)).test_image(image, image_path)
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
-    return {**result, 'model_id': model_id, 'image_id': image_path}
+    output = {**result, 'model_id': model_id, 'image_id': image_path}
+    results.export_anomaly_projection(model_id, image_path, output)
+    return output

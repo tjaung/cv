@@ -253,3 +253,9 @@ TODOs.md
 playground/glob-import/root/follow-symlinks/linked/my-lib
 # Trained models, feature CSVs, and inference outputs
 /artifacts/models/
+
+# Durable generated result data and selected estimators
+/CV/results/data/*
+!/CV/results/data/.gitkeep
+/CV/results/models/*
+!/CV/results/models/.gitkeep

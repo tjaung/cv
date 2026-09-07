@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import SaveModelButton from './SaveModelButton'
+import PatchOverlay from './PatchOverlay'
 import SortHeader from './SortHeader'
 import { useModelSort } from './useModelSort'
 import { getModels, getPCAModel, getModelJob, startPCAJob, getImages, getImageUrl, getModelProjection } from './api'
@@ -21,23 +23,23 @@ function useModel(id: string) {
   return state.id === id ? state : { id }
 }
 
-function Projection({ report, selected }: { report?: PCAReport; selected: string }) {
+function Projection({ report, selected, onProjection }: { report?: PCAReport; selected: string; onProjection: (value: { key: string; data?: PCAProjection; error?: string }) => void }) {
   const id = report?.model_id ?? ''
   const model = useModel(id)
   const key = `${id}:${selected}`
   const [state, setState] = useState<{ key: string; data?: PCAProjection; error?: string }>({ key: '' })
   useEffect(() => {
-    if (!id || !selected || report?.compatible === false) return
+    if (!id || !selected || (report?.compatible === false && !report?.results_saved)) return
     const controller = new AbortController()
     getModelProjection(id, `metal_plate/test/${selected}`, controller.signal).then((data) => {
-      if (!controller.signal.aborted) setState({ key, data })
-    }).catch((e: unknown) => { if (!controller.signal.aborted) setState({ key, error: e instanceof Error ? e.message : 'Could not project image' }) })
+      if (!controller.signal.aborted) { setState({ key, data }); onProjection({ key, data }) }
+    }).catch((e: unknown) => { if (!controller.signal.aborted) { const error = e instanceof Error ? e.message : 'Could not project image'; setState({ key, error }); onProjection({ key, error }) } })
     return () => controller.abort()
-  }, [id, selected, key, report?.compatible])
+  }, [id, selected, key, report?.compatible, report?.results_saved, onProjection])
   if (!report) return <p className="empty">Train models to inspect their PCA space.</p>
   return <div><p className="feature-note">{runName(report)}</p>
     {model.error && <p role="alert">{model.error}</p>}
-    {report.compatible === false ? <p className="feature-note">Retrain this model for the current pipeline. Only its saved reference space is shown.</p> : state.key !== key ? <p className="feature-note" role="status">Projecting selected image…</p> : state.error ? <p role="alert" className="feature-note">{state.error}</p> : <p className="feature-note">{state.data?.prediction} · score {number(state.data?.plate_score ?? 0)}</p>}
+    {(report.compatible === false && !report.results_saved) ? <p className="feature-note">Retrain this model for the current pipeline. Only its saved reference space is shown.</p> : state.key !== key ? <p className="feature-note" role="status">Projecting selected image…</p> : state.error ? <p role="alert" className="feature-note">{state.error}</p> : <p className="feature-note">{state.data?.prediction} · score {number(state.data?.plate_score ?? 0)}</p>}
     {model.data && <PCAScatter key={id} model={model.data} test={state.key === key ? state.data ?? null : null} />}
   </div>
 }
@@ -110,6 +112,8 @@ function ComponentContributions({ model }: { model: PCAModel }) {
 
 
 export default function Models() {
+  const [patchProjection, setPatchProjection] = useState<{ key: string; data?: PCAProjection; error?: string } | null>(null)
+  const [allPatches, setAllPatches] = useState(false)
   const [reports, setReports] = useState<PCAReport[]>([])
   const [family, setFamily] = useState('all')
   const [images, setImages] = useState<string[]>([])
@@ -164,6 +168,14 @@ export default function Models() {
   const selected = images.includes(imageChoice) ? imageChoice : images[0] ?? ''
   const filtered = reports.filter((r) => family === 'all' || (r.config.model_type === 'one_class_svm' ? 'svm' : 'pca') === family)
   const graph = filtered.find((r) => r.model_id === graphChoice) ?? filtered[0]
+  const patchState = patchProjection?.key === `${graph?.model_id}:${selected}` ? patchProjection : null
+  const patchData = (graph?.compatible !== false || graph?.results_saved) ? patchState?.data : undefined
+  const patchMessage = !graph ? 'Select a trained anomaly model to see patch scores.'
+    : graph.compatible === false && !graph.results_saved ? 'Patch overlay unavailable: this model was trained with older preprocessing/features. Use Retrain all models to generate compatible patch scores. Saved evaluations contain counts only, so their patch locations cannot be recovered.'
+    : patchState?.error ? `Patch overlay unavailable: ${patchState.error}`
+    : !patchData ? 'Scoring image patches…'
+    : `${patchData.anomalous_patches} of ${patchData.patches.length} patches exceed this model’s patch threshold. ${patchData.anomalous_patches === 0 ? 'No patches were flagged; choose All scored patches to inspect the grid.' : 'Red boxes are flagged patches.'} The image classification uses a separate image threshold.`
+
   const summary = useModelSort(filtered, 'performance', selected)
   const predictions = useModelSort(filtered, 'correct', selected)
   const classes = [...new Set(filtered.flatMap((r) => Object.keys(r.evaluation?.groups ?? {})))].sort((a, b) => a === b ? 0 : a === 'good' ? -1 : b === 'good' ? 1 : a.localeCompare(b))
@@ -180,19 +192,19 @@ export default function Models() {
     window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler)
   }, [images, imageIndex])
   return <section className="models-comparison-page"><div className="page-intro"><h2>Anomaly detection</h2><p>Compare PCA and one-class SVM. Every new model uses all 459 LAB, Sobel, HOG, and Frangi features from the complete preprocessing pipeline.</p></div>
-    <div className="model-controls panel model-training"><button disabled={!!job || starting} onClick={() => void retrain()}>Retrain all models ({count})</button><span>All supported parameter combinations · replaces fitted runs and preserves previous result records.</span></div>
+    <div className="model-controls panel model-training"><button disabled={!!job || starting} onClick={() => void retrain()}>Retrain all models ({count})</button><span>All supported parameter combinations · CSVs and plot data are kept in CV/results/data. Save selected fitted models to CV/results/models before deleting artifacts.</span></div>
     <nav className="model-tabs" aria-label="Filter model types">{[['all', 'All models'], ['pca', 'PCA'], ['svm', 'One-class SVM']].map(([value, label]) => <button key={value} aria-current={family === value ? 'page' : undefined} onClick={() => setFamily(value)}>{label}</button>)}</nav>
     {error && <p role="alert" className="panel empty">{error}</p>}
     {job && <div className="panel model-progress" role="status">{job.combinations ? `${job.combination ?? 0} / ${job.combinations} processed · ${job.completed ?? 0} saved · ${job.failed ?? 0} failed · ` : ''}{job.phase} {job.total ? `${job.done} / ${job.total}` : ''}</div>}
     <section className="panel"><div className="panel-heading"><h3>Performance summary</h3><span>{filtered.length} models</span></div><p className="feature-note">Default ranking: defect recall, then fewer false alarms. Click headers to sort. Class columns show correctly labeled images as correct/total (percentage): GOOD for good plates, BAD for each defect type.</p>
-      <div className="model-table-scroll model-summary-table"><table><thead><tr>{[['name','Model'],['images','Images / skipped'],['accuracy','Accuracy'],['recall','Recall'],['precision','Precision'],['f1','F1'],['fpr','False alarms'],['tp','TP'],['fp','FP'],['tn','TN'],['fn','FN']].map(([key,label]) => <SortHeader key={key} column={key} sort={summary.sort} onSort={summary.choose}>{label}</SortHeader>)}{classes.map((label) => <SortHeader key={label} column={`class:${label}`} sort={summary.sort} onSort={summary.choose}>{label}</SortHeader>)}</tr></thead>
-        <tbody>{summary.rows.map((r) => { const e = r.evaluation; return <tr key={r.model_id}><th>{runName(r)}{r.config.feature_set !== 'lab_sobel_hog_frangi' && ' · legacy features'}</th><td>{e ? `${e.images} / ${e.skipped.length}` : 'Not evaluated'}</td><td>{percent(e?.images ? (e.tp + e.tn) / e.images : null)}</td><td>{percent(e?.recall)}</td><td>{percent(e?.precision)}</td><td>{percent(e && 2*e.tp+e.fp+e.fn ? 2*e.tp/(2*e.tp+e.fp+e.fn) : null)}</td><td>{percent(e?.false_positive_rate)}</td>{(['tp','fp','tn','fn'] as const).map((k) => <td key={k}>{e?.[k] ?? '—'}</td>)}{classes.map((label) => { const rows = e?.rows.filter((p) => p.label === label) ?? []; const correct = rows.filter((p) => p.prediction === p.actual).length; return <td key={label}>{rows.length ? `${correct}/${rows.length} (${percent(correct / rows.length)})` : '—'}</td> })}</tr> })}</tbody></table></div>
+      <div className="model-table-scroll model-summary-table"><table><thead><tr>{[['name','Model'],['images','Images / skipped'],['accuracy','Accuracy'],['recall','Recall'],['precision','Precision'],['f1','F1'],['fpr','False alarms'],['tp','TP'],['fp','FP'],['tn','TN'],['fn','FN']].map(([key,label]) => <SortHeader key={key} column={key} sort={summary.sort} onSort={summary.choose}>{label}</SortHeader>)}{classes.map((label) => <SortHeader key={label} column={`class:${label}`} sort={summary.sort} onSort={summary.choose}>{label}</SortHeader>)}<th>Keep fitted model</th></tr></thead>
+        <tbody>{summary.rows.map((r) => { const e = r.evaluation; return <tr key={r.model_id}><th>{runName(r)}{r.config.feature_set !== 'lab_sobel_hog_frangi' && ' · legacy features'}</th><td>{e ? `${e.images} / ${e.skipped.length}` : 'Not evaluated'}</td><td>{percent(e?.images ? (e.tp + e.tn) / e.images : null)}</td><td>{percent(e?.recall)}</td><td>{percent(e?.precision)}</td><td>{percent(e && 2*e.tp+e.fp+e.fn ? 2*e.tp/(2*e.tp+e.fp+e.fn) : null)}</td><td>{percent(e?.false_positive_rate)}</td>{(['tp','fp','tn','fn'] as const).map((k) => <td key={k}>{e?.[k] ?? '—'}</td>)}{classes.map((label) => { const rows = e?.rows.filter((p) => p.label === label) ?? []; const correct = rows.filter((p) => p.prediction === p.actual).length; return <td key={label}>{rows.length ? `${correct}/${rows.length} (${percent(correct / rows.length)})` : '—'}</td> })}<td><SaveModelButton family="anomaly" modelId={r.model_id} saved={r.model_saved} available={r.model_available} /></td></tr> })}</tbody></table></div>
       {!filtered.length && <p className="empty">No fitted models in this view. Use Retrain all models to populate the comparison.</p>}
     </section>
     <section className="panel"><div className="panel-heading"><h3>Individual predictions</h3><div className="model-controls"><button disabled={imageIndex<=0} onClick={() => moveImage(-1)}>← Image</button><label>Image <select value={selected} onChange={(e) => setImageChoice(e.target.value)}>{images.map((name) => <option key={name}>{name}</option>)}</select></label><button disabled={imageIndex<0 || imageIndex>=images.length-1} onClick={() => moveImage(1)}>Image →</button></div></div>
-      <div className="model-prediction-columns"><figure>{selected && <img src={getImageUrl('metal_plate','test',selected)} alt={selected} />}<figcaption>{selected}</figcaption></figure>
+      <div className="model-prediction-columns"><figure>{selected && <PatchOverlay key={`${graph?.model_id}:${selected}`} src={getImageUrl('metal_plate','test',selected)} alt={selected} patches={patchData ? patchData.patches.filter(p => allPatches || p.anomalous).map(p => ({ ...p, color: p.anomalous ? '#f23b35' : '#3685ce', label: `${p.anomalous ? 'Flagged' : 'Not flagged'} · patch score ${number(p.error)} · threshold ${number(patchData.patch_threshold)}` })) : []} description={patchMessage} />}<figcaption>{selected}</figcaption><div className="view-switch"><button disabled={!patchData} aria-pressed={!allPatches} onClick={() => setAllPatches(false)}>Flagged patches</button><button disabled={!patchData} aria-pressed={allPatches} onClick={() => setAllPatches(true)}>All scored patches</button></div></figure>
         <div className="model-table-scroll prediction-table"><table><thead><tr>{[['name','Model'],['correct','Correct?'],['prediction','Prediction'],['score','Score'],['threshold','Threshold']].map(([key,label]) => <SortHeader key={key} column={key} sort={predictions.sort} onSort={predictions.choose}>{label}</SortHeader>)}</tr></thead><tbody>{predictions.rows.map((r) => { const p=r.evaluation?.rows.find((p)=>p.image_id===`metal_plate/test/${selected}`); return <tr key={r.model_id} aria-selected={graph?.model_id===r.model_id}><th><button onClick={() => setGraphChoice(r.model_id)}>{runName(r)}</button></th><td>{p ? p.prediction===p.actual ? 'Yes' : 'No' : '—'}</td><td>{p ? `${p.prediction} (actual ${p.actual})` : 'Not evaluated'}</td><td>{p ? number(p.score) : '—'}</td><td>{number(r.plate_threshold)}</td></tr> })}</tbody></table></div>
-        <div className="prediction-graph"><Projection report={graph} selected={selected} /></div>
+        <div className="prediction-graph"><Projection report={graph} selected={selected} onProjection={setPatchProjection} /></div>
       </div><p className="feature-note">Click a model name to project this image into its PCA space. Correct predictions appear first; unevaluated images have no stored classification.</p>
     </section>
     <PCAAnalysis reports={filtered} />

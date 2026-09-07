@@ -177,7 +177,7 @@ export interface PCAReport {
   training_images: number; calibration_images: number; training_patches: number; calibration_patches: number
   patch_threshold: number; plate_threshold: number
   explained_variance_ratio: number[]
-  compatible?: boolean
+  compatible?: boolean; results_saved?: boolean; model_saved?: boolean; model_available?: boolean
   config: { pipeline_signature?: string; feature_set?: string; model_type?: string; kernel?: string; nu?: number; gamma?: string | number; support_vectors?: number; distance_metric?: string; patch_size: number; variance_target: number; quantile: number; source: string }
   skipped: { image_id: string; reason: string }[]
   evaluation?: PCAEvaluation | null
@@ -242,4 +242,9 @@ export async function classifierRequest<T>(path = '', body?: object, signal?: Ab
   const data = await response.json()
   if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Classifier request failed')
   return data
+}
+
+export async function saveResultModel(family: 'anomaly' | 'classifiers', modelId: string, runId?: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/results/save_model/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ family, model_id: modelId, run_id: runId }) })
+  if (!response.ok) { const error = await response.json(); throw new Error(typeof error.detail === 'string' ? error.detail : 'Could not save model') }
 }

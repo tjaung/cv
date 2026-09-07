@@ -1,3 +1,4 @@
+import ClassifierPatchImage from './ClassifierPatchImage'
 import { useEffect, useRef, useState } from 'react'
 import { classifierRequest, getImageUrl } from './api'
 import type { Model, Summary } from './Classifiers'
@@ -20,11 +21,14 @@ export default function RandomClassifierReview({ summary, training }: { summary:
     } catch { /* A missing or invalid saved session starts fresh. */ }
     return blank()
   })
+  const [explanationModel, setExplanationModel] = useState('')
   const [error, setError] = useState('')
   const [storageError, setStorageError] = useState('')
   const [attempt, setAttempt] = useState(0)
   const section = useRef<HTMLElement>(null)
   const advancing = useRef(false)
+  const followed = summary.models.find(m => m.id === explanationModel)
+  const displayedModel = followed?.id ?? summary.models[0].id
   const selected = session.selected
   const sample = selected === null ? null : inventory[selected]
   const current = sample ? session.results[sample.path] : undefined
@@ -88,10 +92,12 @@ export default function RandomClassifierReview({ summary, training }: { summary:
       const items = inventory.filter(s => s.label === label), used = items.filter(s => session.used[s.path]).length
       return <tr key={label}><th>{label}</th><td>{used} / {items.length}</td><td>{items.length-used}</td></tr>
     })}</tbody></table></div>
-    {sample && <div className="random-classifier-inspection"><figure><img src={getImageUrl('metal_plate', sample.original_split, sample.path.split('/').slice(2).join('/'))} alt={sample.path} /><figcaption><strong>{sample.path.split('/').pop()}</strong><p>Actual: {sample.label} · {selected! < summary.train.length ? 'Training image (seen during fitting)' : 'Holdout image'}</p><span>{sample.path}</span></figcaption></figure><div>
+    {followed && <p className="feature-note">Following {modelName(followed)} · pinned first with automatic patch explanations. <button onClick={() => setExplanationModel('')}>Stop following</button></p>}
+    {!followed && <p className="feature-note">Click a model name below to follow it across random images and automatically explain its predicted defect patches.</p>}
+    {sample && <div className="random-classifier-inspection"><figure><ClassifierPatchImage key={`${displayedModel}:${selected}`} autoExplain={!!followed} run={summary.run_id} model={displayedModel} index={selected!} src={getImageUrl('metal_plate', sample.original_split, sample.path.split('/').slice(2).join('/'))} alt={sample.path} /><figcaption><strong>{sample.path.split('/').pop()}</strong><p>Actual: {sample.label} · {selected! < summary.train.length ? 'Training image (seen during fitting)' : 'Holdout image'}</p><span>{sample.path}</span></figcaption></figure><div>
       {needsScoring && !error && <p role="status">Classifying with every model…</p>}
       {error && <p role="alert">{error} <button onClick={() => { setError(''); setAttempt(a => a+1) }}>Retry this image</button></p>}
-      {current && <div className="model-table-scroll"><table><thead><tr><th>Model</th><th>Prediction</th><th>Result</th></tr></thead><tbody>{[...current.predictions].sort((a,b) => Number(b.correct)-Number(a.correct)).map(p => <tr key={p.model_id}><th>{modelName(summary.models.find(m => m.id === p.model_id)!)}</th><td>{p.prediction}</td><td className={p.correct ? 'classification-right' : 'classification-wrong'}>{p.correct ? 'Right' : 'Wrong'}</td></tr>)}</tbody></table></div>}
+      {current && <div className="model-table-scroll"><table><thead><tr><th>Model</th><th>Prediction</th><th>Result</th></tr></thead><tbody>{[...current.predictions].sort((a,b) => Number(b.model_id === followed?.id)-Number(a.model_id === followed?.id) || Number(b.correct)-Number(a.correct)).map(p => <tr key={p.model_id} aria-selected={followed?.id === p.model_id}><th><button aria-pressed={explanationModel === p.model_id} onClick={() => setExplanationModel(p.model_id)}>{followed?.id === p.model_id ? 'Following · ' : ''}{modelName(summary.models.find(m => m.id === p.model_id)!)}</button></th><td>{p.prediction}</td><td className={p.correct ? 'classification-right' : 'classification-wrong'}>{p.correct ? 'Right' : 'Wrong'}</td></tr>)}</tbody></table></div>}
     </div></div>}
     <details className="model-training"><summary>Image usage dictionary ({completed} true / {inventory.length-completed} false)</summary><div className="model-table-scroll random-usage"><table><thead><tr><th>Image path</th><th>Used</th></tr></thead><tbody>{inventory.map(s => <tr key={s.path}><td>{s.path}</td><td>{String(session.used[s.path])}</td></tr>)}</tbody></table></div></details>
     {finished && <section className="model-training" aria-label="Final classifier ranking"><h3>Final ranking · entire dataset review</h3><p>Ranked by total correctly classified images. Models with equal totals share a rank.</p><div className="model-table-scroll"><table><thead><tr><th>Rank</th><th>Model</th><th>All images correct</th><th>Training correct</th><th>Holdout correct</th>{summary.classes.map(c => <th key={c}>{c}</th>)}</tr></thead><tbody>{rankings.map(r => <tr key={r.model.id}><td>{1+rankings.filter(other => other.correct>r.correct).length}</td><th>{modelName(r.model)}</th><td>{fraction(r.correct,inventory.length)}</td><td>{fraction(r.train,summary.train.length)}</td><td>{fraction(r.test,summary.test.length)}</td>{summary.classes.map(c => <td key={c}>{fraction(r.perClass[c],inventory.filter(s=>s.label===c).length)}</td>)}</tr>)}</tbody></table></div></section>}

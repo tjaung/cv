@@ -13,4 +13,6 @@ I added frangi filters and that seemed to help. I only got one model to work wel
 
 I think Im going to try out using a classifier now instead of an anomaly detector. I want to try a classifier for each class and an object detection model for finding scratches and rust.
 
-Classifiers work amazingly. SVMs seemed to perform the best with my pick being a linear kernel SVM with variance_target = 0.95 and C=0.1. I worry that these models could be overfitting.
+Classifiers work amazingly. SVMs seemed to perform the best with my pick being a linear kernel SVM with variance_target = 0.95 and C=0.1. 
+
+I also want to use object detection. I will need to split the data again like with classifiers probably. I think I will need to add to the pipeline again, probably doing more thresholding and segmenting to extract features of rust and scratches. I will try the embedded approach first as a baseline, then try some detection models, maybe a CNN. 

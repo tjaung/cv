@@ -153,6 +153,8 @@ def retrain_all_models():
                     stop.set()
                 if new_id and (models.ARTIFACT_ROOT / new_id / '.pending').exists():
                     _remove(models.ARTIFACT_ROOT / new_id)
+                    # This candidate never completed evaluation or publication.
+                    shutil.rmtree(models.results.data_root('anomaly') / new_id, ignore_errors=True)
                 with models._lock:
                     failures.append({'parameters': parameters, 'error': str(error)})
             finally:

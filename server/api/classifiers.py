@@ -18,6 +18,8 @@ from CV.models.classifiers import ImageStore, PCAClassifier, SVMClassifier, KNNC
 from .os_helpers import folder_path
 from . import models
 
+from . import result_store as results
+
 ROOT = Path(__file__).resolve().parents[2] / 'artifacts/classifiers'
 
 
@@ -44,15 +46,38 @@ def _write(path, value):
 def _current():
     pointer = ROOT / 'current.json'
     if not pointer.exists():
+        pointer = results.data_root('classifiers') / 'current.json'
+    if not pointer.exists():
         return None
-    return ROOT / json.loads(pointer.read_text())['run_id']
+    return _run_directory(json.loads(pointer.read_text())['run_id'])
 
+
+
+def _run_directory(run_id):
+    results.validate_id(run_id)
+    artifact = ROOT / run_id
+    return artifact if (artifact / 'summary.json').exists() else results.data_root('classifiers') / run_id
+
+
+def _model_file(directory, model_id):
+    artifact = directory / f'{model_id}.joblib'
+    saved = results.saved_root('classifiers') / directory.name / artifact.name
+    if artifact.exists():
+        return artifact
+    if saved.exists():
+        return saved
+    raise HTTPException(410, 'Fitted model is not retained. Saved results remain viewable; retrain this configuration to compute new explanations or curves.')
 
 def list_classifiers():
     directory = _current()
     with models._lock:
         active = next((dict(j) for j in models._jobs.values() if j['kind'] == 'classifiers' and j['status'] in ('queued', 'running')), None)
-    return {'summary': {**json.loads((directory / 'summary.json').read_text()), 'run_id': directory.name} if directory else None,
+    summary = results.read_json(directory / 'summary.json') if directory else None
+    if summary:
+        for report in summary['models']:
+            report['model_saved'] = (results.saved_root('classifiers') / directory.name / f"{report['id']}.joblib").exists()
+            report['model_available'] = report['model_saved'] or (ROOT / directory.name / f"{report['id']}.joblib").exists()
+    return {'summary': {**summary, 'run_id': directory.name} if summary else None,
             'active_job': active, 'configurations': len(list(configurations()))}
 
 
@@ -92,6 +117,7 @@ def train_classifiers(body: TrainingRequest):
         np.savez_compressed(directory / 'features.npz', train=train, test=test)
         _write(directory / 'summary.json', summary)
         _write(ROOT / 'current.json', {'run_id': directory.name})
+        results.export_classifier_summary(directory, summary)
         configs = list(configurations())
         with threadpool_limits(limits=1):
             for i, config in enumerate(configs):
@@ -113,6 +139,7 @@ def train_classifiers(body: TrainingRequest):
                     evaluation['balanced_accuracy'] = float(balanced_accuracy_score(truth, evaluation['predictions']))
                     model_id = uuid.uuid4().hex
                     model.save(directory / f'{model_id}.joblib')
+                    results.export_classifier_plot(directory, model_id, model, summary, train, test)
                     summary['models'].append({'id': model_id, 'config': config, 'evaluation': evaluation, 'training_evaluation': training_evaluation,
                                               'cv': {key[5:]: {'mean': float(value.mean()), 'std': float(value.std()), 'folds': value.tolist()}
                                                      for key, value in scores.items() if key.startswith('test_')}})
@@ -121,6 +148,7 @@ def train_classifiers(body: TrainingRequest):
                     if isinstance(error, OSError) and error.errno == 28:
                         raise
                 _write(directory / 'summary.json', summary)
+                results.export_classifier_summary(directory, summary)
         return {'models': len(summary['models']), 'failures': summary['failures']}
     return models._submit('classifiers', run)
 
@@ -133,7 +161,12 @@ def inspect_classifier(model_id: str, image_index: int = 0):
     report = next((r for r in summary['models'] if r['id'] == model_id), None)
     if report is None or not 0 <= image_index < len(summary['test']):
         raise HTTPException(404, 'Model or test image not found')
-    model = joblib.load(directory / f'{model_id}.joblib')
+    snapshot = results.data_root('classifiers') / directory.name / 'plots' / f'{model_id}.json.gz'
+    if snapshot.exists():
+        plot = results.read_json(snapshot)
+        index = len(summary['train']) + image_index
+        return {**{k:v for k,v in plot.items() if k not in ('samples','neighbors')}, 'selected': plot['samples'][index], 'neighbors': plot['neighbors'][index]}
+    model = joblib.load(_model_file(directory, model_id))
     with np.load(directory / 'features.npz') as data:
         train, test = data['train'], data['test']
     selected = test[image_index:image_index + 1]
@@ -181,7 +214,7 @@ def classify_review_image(run_id: str, image_index: int):
     """
     if len(run_id) != 32 or any(c not in '0123456789abcdef' for c in run_id):
         raise HTTPException(400, 'Invalid classifier run ID')
-    directory = ROOT / run_id
+    directory = _run_directory(run_id)
     if not (directory / 'summary.json').is_file():
         raise HTTPException(404, 'Classifier run not found')
     summary = json.loads((directory / 'summary.json').read_text())
@@ -193,15 +226,18 @@ def classify_review_image(run_id: str, image_index: int):
     training = image_index < len(summary['train'])
     membership = 'training' if training else 'holdout'
     index = image_index if training else image_index - len(summary['train'])
-    with np.load(directory / 'features.npz') as data:
-        features = data['train' if training else 'test'][index:index + 1]
     sample = inventory[image_index]
     predictions = []
-    with threadpool_limits(limits=1):
-        for report in summary['models']:
-            model = joblib.load(directory / f"{report['id']}.joblib")
+    for report in summary['models']:
+        evaluation = report.get('training_evaluation' if training else 'evaluation')
+        if evaluation:
+            prediction = evaluation['predictions'][index]
+        else:
+            with np.load(directory / 'features.npz') as data:
+                features = data['train' if training else 'test'][index:index+1]
+            model = joblib.load(_model_file(directory, report['id']))
             prediction = str(model.predict(features)[0])
-            predictions.append({'model_id': report['id'], 'prediction': prediction, 'correct': prediction == sample['label']})
+        predictions.append({'model_id':report['id'], 'prediction':prediction, 'correct':prediction == sample['label']})
     return {'run_id': run_id, 'image_index': image_index, **sample, 'membership': membership, 'predictions': predictions}
 
 
@@ -213,7 +249,7 @@ def _saved_training_evaluation(directory, model_id, model_mtime, features_mtime)
     truth = [s['label'] for s in summary['train']]
     with np.load(directory / 'features.npz') as data:
         train = data['train']
-    model = joblib.load(directory / f'{model_id}.joblib')
+    model = joblib.load(_model_file(directory, model_id))
     with threadpool_limits(limits=1):
         evaluation = model.test(train, truth)
     evaluation['balanced_accuracy'] = float(balanced_accuracy_score(truth, evaluation['predictions']))
@@ -223,14 +259,14 @@ def _saved_training_evaluation(directory, model_id, model_mtime, features_mtime)
 def get_classifier_training_metrics(run_id: str):
     if len(run_id) != 32 or any(c not in '0123456789abcdef' for c in run_id):
         raise HTTPException(400, 'Invalid classifier run ID')
-    directory = ROOT / run_id
+    directory = _run_directory(run_id)
     if not (directory / 'summary.json').is_file():
         raise HTTPException(404, 'Classifier run not found')
     summary = json.loads((directory / 'summary.json').read_text())
     metrics = {}
     for report in summary['models']:
         metrics[report['id']] = report.get('training_evaluation') or _saved_training_evaluation(
-            str(directory), report['id'], (directory / f"{report['id']}.joblib").stat().st_mtime_ns,
+            str(directory), report['id'], _model_file(directory, report['id']).stat().st_mtime_ns,
             (directory / 'features.npz').stat().st_mtime_ns)
     return metrics
 
@@ -243,7 +279,7 @@ class CurveRequest(BaseModel):
 def _curve_directory(run_id, model_id):
     if any(len(value) != 32 or any(c not in '0123456789abcdef' for c in value) for value in (run_id, model_id)):
         raise HTTPException(400, 'Invalid run or model ID')
-    directory = ROOT / run_id
+    directory = _run_directory(run_id)
     if not (directory / 'summary.json').is_file():
         raise HTTPException(404, 'Classifier run not found')
     summary = json.loads((directory / 'summary.json').read_text())
@@ -254,7 +290,9 @@ def _curve_directory(run_id, model_id):
 
 def get_classifier_curves(run_id: str, model_id: str):
     directory = _curve_directory(run_id, model_id)
-    path = directory / f'{model_id}-learning-curves.json'
+    path = results.data_root('classifiers') / directory.name / f'{model_id}-learning-curves.json'
+    if not path.exists():
+        path = directory / f'{model_id}-learning-curves.json'
     with models._lock:
         job = next((dict(j) for j in reversed(list(models._jobs.values())) if j.get('curve_run') == run_id and j.get('curve_model') == model_id), None)
     return {'curve': json.loads(path.read_text()) if path.exists() else None, 'job': job}
@@ -275,14 +313,54 @@ def train_classifier_curves(body: CurveRequest):
             folds = [(np.array(f['train_indices']), np.array(f['validation_indices'])) for f in json.loads(manifest.read_text())]
         else:
             folds = list(StratifiedGroupKFold(summary['folds'], shuffle=True, random_state=summary['seed']).split(features, labels, groups))
-        model = joblib.load(directory / f'{body.model_id}.joblib')
+        model = joblib.load(_model_file(directory, body.model_id))
         with threadpool_limits(limits=1):
             curve = learning_curves(model.pipeline, features, labels, groups, folds, summary['seed'],
                                     progress=lambda done, total: models._progress(job_id, 'Computing learning curves', done, total))
         curve.update(run_id=body.run_id, model_id=body.model_id)
-        _write(directory / f'{body.model_id}-learning-curves.json', curve)
+        results.write_json(results.data_root('classifiers') / directory.name / f'{body.model_id}-learning-curves.json', curve)
+        results.write_csv(results.data_root('classifiers') / directory.name / f'{body.model_id}-learning-curves.csv', curve['points'])
         return {'model_id': body.model_id}
     result = models._submit('classifier_curves', run)
     with models._lock:
         models._jobs[result['job_id']].update(curve_run=body.run_id, curve_model=body.model_id)
     return result
+
+
+def get_classifier_patch_explanation(run_id: str, model_id: str, image_index: int):
+    from CV.postprocessing import explain_patches
+    from CV.models.feature_sets import feature_signature, extract_model_features
+    from CV.models.classifiers.base import FEATURE_SET
+    from .os_helpers import image_path
+    import cv2
+    directory = _curve_directory(run_id, model_id)
+    summary = json.loads((directory / 'summary.json').read_text())
+    inventory = summary['train'] + summary['test']
+    if not 0 <= image_index < len(inventory):
+        raise HTTPException(404, 'Image not found')
+    sample = inventory[image_index]
+    snapshot = results.data_root('classifiers') / directory.name / 'explanations' / f'{model_id}-{image_index}.json.gz'
+    if snapshot.exists():
+        return results.read_json(snapshot)
+    model = joblib.load(_model_file(directory, model_id))
+    if model.signature != feature_signature(FEATURE_SET):
+        raise HTTPException(409, 'Feature pipeline changed; retrain before generating patch explanations')
+    image = cv2.imread(str(image_path(sample['path'])))
+    if image is None:
+        raise HTTPException(422, 'Could not decode image')
+    try:
+        patches = extract_model_features(image, sample['path'], model.patch_size, feature_set=FEATURE_SET)
+        pooled = np.concatenate((patches.values.mean(axis=0), patches.values.std(axis=0)))
+        training = image_index < len(summary['train'])
+        index = image_index if training else image_index-len(summary['train'])
+        with np.load(directory / 'features.npz') as data:
+            saved = data['train' if training else 'test'][index]
+        if not np.allclose(pooled, saved, rtol=1e-5, atol=1e-6):
+            raise HTTPException(409, 'Image features differ from the saved run; retrain before explaining this prediction')
+        with threadpool_limits(limits=1):
+            result = explain_patches(model, patches.values, patches.records)
+        output = {**result, 'width': image.shape[1], 'height': image.shape[0]}
+        results.write_json(snapshot, output)
+        return output
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error

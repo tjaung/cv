@@ -1,4 +1,6 @@
 import json
+import shutil
+import csv
 import tempfile
 import unittest
 from pathlib import Path
@@ -34,7 +36,7 @@ class ClassifierAPITests(unittest.TestCase):
             configs = [dict(kind='pca', variance_target=.95, metric='euclidean'),
                        dict(kind='svm', variance_target=.95, kernel='linear', C=1.),
                        dict(kind='knn', variance_target=.95, n_neighbors=3, weights='distance')]
-            with patch.object(classifiers, 'ROOT', root / 'artifacts'), patch.object(classifiers, 'folder_path', return_value=dataset), patch.object(models, '_submit', side_effect=submit), patch.object(PCAClassifier, 'extract_features', extract), patch.object(classifiers, 'configurations', return_value=configs):
+            with patch('server.api.result_store.RESULTS_ROOT', root / 'results'), patch.object(classifiers, 'ROOT', root / 'artifacts'), patch.object(classifiers, 'folder_path', return_value=dataset), patch.object(models, '_submit', side_effect=submit), patch.object(PCAClassifier, 'extract_features', extract), patch.object(classifiers, 'configurations', return_value=configs):
                 self.assertIsNone(classifiers.list_classifiers()['summary'])
                 result = classifiers.train_classifiers(classifiers.TrainingRequest())
                 self.assertEqual(result['failures'], [])
@@ -117,6 +119,26 @@ class ClassifierAPITests(unittest.TestCase):
                 # Invalid identifiers cannot access arbitrary artifact files.
                 with self.assertRaises(Exception):
                     classifiers.inspect_classifier('../model', 0)
+
+                # All stored predictions and charts remain usable without artifacts.
+                from server.api import result_store as results
+                selected_id = summary['models'][0]['id']
+                results.save_selected_model(results.SaveModelRequest(family='classifiers', run_id=run_id, model_id=selected_id))
+                shutil.rmtree(classifiers.ROOT)
+                retained = classifiers.list_classifiers()['summary']
+                self.assertEqual(len(retained['models']), 3)
+                self.assertEqual(sum(r['model_saved'] for r in retained['models']), 1)
+                self.assertEqual(classifiers.get_classifier_training_metrics(run_id), metrics)
+                self.assertEqual(classifiers.classify_review_image(run_id, 0), training_result)
+                self.assertEqual(classifiers.classify_review_image(run_id, 48), holdout_result)
+                for report in retained['models']:
+                    plot = classifiers.inspect_classifier(report['id'], 0)
+                    self.assertEqual(len(plot['training']), 48)
+                    self.assertEqual(len(plot['regions']), 45)
+                self.assertEqual(len(classifiers.get_classifier_curves(run_id, selected_id)['curve']['points']), 5)
+                with (results.data_root('classifiers') / run_id / 'predictions.csv').open() as stream:
+                    self.assertEqual(len(list(csv.DictReader(stream))), 180)
+                self.assertTrue((results.saved_root('classifiers') / run_id / f'{selected_id}.joblib').exists())
 
     def test_parameter_grid(self):
         self.assertEqual(len(list(classifiers.configurations())), 42)

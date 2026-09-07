@@ -7,7 +7,7 @@ type Point = { fraction: number; images: number; min_images: number; max_images:
 type Curve = { points: Point[]; folds: number }
 type State = { curve: Curve | null; job: ModelJob | null }
 
-export default function ClassifierLearningCurves({ run, model }: { run: string; model: string }) {
+export default function ClassifierLearningCurves({ run, model, canCompute = true }: { run: string; model: string; canCompute?: boolean }) {
   const [data, setData] = useState<State | null>(null)
   const [error, setError] = useState('')
   const [starting, setStarting] = useState(false)
@@ -36,7 +36,8 @@ export default function ClassifierLearningCurves({ run, model }: { run: string; 
   const curve = data?.curve
   return <section className="classifier-learning-curves"><h3>Loss / learning curves</h3>
     <p>Training and CV validation error versus training-set size, not optimization epochs. Each point refits a temporary copy using only the training split. Lower is better; a persistent training–validation gap suggests overfitting. Saved classifiers and holdout data are unchanged.</p>
-    <button disabled={busy} onClick={() => void generate()}>{busy ? 'Computing curves…' : curve ? 'Recompute learning curves' : 'Generate learning curves for this model'}</button>
+    <button disabled={busy || !canCompute} onClick={() => void generate()}>{busy ? 'Computing curves…' : curve ? 'Recompute learning curves' : 'Generate learning curves for this model'}</button>
+    {!canCompute && <p>Saved curves remain viewable. Generating new curves requires a retained fitted model.</p>}
     {busy && <span role="status"> {data?.job?.done ?? 0} / {data?.job?.total || 25} fold fits</span>}
     {error && <p role="alert">{error}</p>}
     {curve && <><p>{curve.folds} CV folds · nested subsets of 20%, 40%, 60%, 80%, and 100% of each fold’s training groups. Green: training. Blue: validation. Whiskers: ±1 standard deviation across folds, not confidence intervals. KNN training error may be zero because each image can match itself.</p>
