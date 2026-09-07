@@ -1,3 +1,3 @@
-from .preprocessing import PreprocessingResult, preprocess_plate
+from .preprocessing import PreprocessingResult, SegmentationResult, preprocess_plate, segment_plate
 
-__all__ = ['PreprocessingResult', 'preprocess_plate']
+__all__ = ["PreprocessingResult", "SegmentationResult", "preprocess_plate", "segment_plate"]

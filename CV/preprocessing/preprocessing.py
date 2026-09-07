@@ -58,10 +58,23 @@ class PreprocessingResult:
     final_plate: np.ndarray
 
 
-def preprocess_plate(image, luminance_percentage=10, blur_size=5,
-                     fill_holes=True, allow_border_touching=True, sobel_strength=1.0, threshold_offset=20,
-                     glare_cutoff=220, surrounding_radius=5, run_glare_fill=True, blend_width=3, contrast_factor=1.5):
+@dataclass
+class SegmentationResult:
+    normalized: np.ndarray
+    gray: np.ndarray
+    blurred: np.ndarray
+    edge_bold: np.ndarray
+    threshold: float
+    threshold_mask: np.ndarray
+    cleaned_mask: np.ndarray
+    plate_mask: np.ndarray
+    plate: np.ndarray
 
+
+def segment_plate(image, luminance_percentage=10, blur_size=5,
+                  fill_holes=True, allow_border_touching=True,
+                  sobel_strength=1.0, threshold_offset=20):
+    """Run only through masking the normalized color plate."""
     if image.dtype != np.uint8 or image.ndim != 3 or image.shape[2] != 3 or image.size == 0:
         raise ValueError('Expected a nonempty 8-bit BGR image')
 
@@ -73,6 +86,20 @@ def preprocess_plate(image, luminance_percentage=10, blur_size=5,
     cleaned_mask = morphological_cleanup(threshold_mask, fill_holes=fill_holes)
     plate_mask = extract_plate_mask(cleaned_mask, fill_holes, allow_border_touching)
     plate = apply_plate_mask(normalized, plate_mask)
+    return SegmentationResult(normalized, gray, blurred, edge_bold, threshold,
+                              threshold_mask, cleaned_mask, plate_mask, plate)
+
+
+def preprocess_plate(image, luminance_percentage=10, blur_size=5,
+                     fill_holes=True, allow_border_touching=True, sobel_strength=1.0, threshold_offset=20,
+                     glare_cutoff=220, surrounding_radius=5, run_glare_fill=True, blend_width=3, contrast_factor=1.5):
+
+    segmented = segment_plate(image, luminance_percentage, blur_size, fill_holes,
+                              allow_border_touching, sobel_strength, threshold_offset)
+    normalized, gray, blurred, edge_bold = (segmented.normalized, segmented.gray,
+                                           segmented.blurred, segmented.edge_bold)
+    threshold, threshold_mask = segmented.threshold, segmented.threshold_mask
+    cleaned_mask, plate_mask, plate = segmented.cleaned_mask, segmented.plate_mask, segmented.plate
     plate_gray = to_grayscale(plate)
     glare_mask = glare_threshold(plate_gray, plate_mask, glare_cutoff)
     color_filled_plate = (fill_surrounding_color(plate, glare_mask, plate_mask, surrounding_radius)
