@@ -211,7 +211,7 @@ function DatasetViewer() {
       <details className="panel preprocessing-writeup" open>
         <summary>Dataset Exploration</summary>
         <article className="preprocessing-writeup-content">
-          <p>I made this tool to view images for each dataset. I wanted to manually inspect each image and see if I could identify problems and features that I would need to extract. I ended up choosing the metal plate dataset. Honestly, because I thought that it would be the simplest one to do (though I learned it wasn't as simple).</p>
+          <p>I made this tool to view images for each dataset. I wanted to manually inspect each image and see if I could identify problems and features that I would need to extract. I ended up choosing the metal plate dataset because I thought it would be the simplest one to work with, though I learned it was not as simple as it looked.</p>
           <p>Looking at the images, I noticed a few things that I would need to work on. One is the glare. There is a lot of light reflection on the plate surface, but only for a few training instances. If not preprocessed carefully, it's possible that the glare could be mistaken as a defect.</p>
           <p>Two, total rust and major rust are similar, but they are also like a continuous representation of the same issue. I would need to distinguish these two classes well.</p>
           <p>Third, scratches are often very light. I would need to be able to extract light scratches and differentiate them from regular paint bubbles on good plate surfaces.</p>
