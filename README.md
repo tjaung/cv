@@ -1,4 +1,4 @@
-# Metal Plate CV Lab
+# Metal Plate CV Tristar assignment
 
 A lab notebook for exploring metal plate images, preprocessing, features, and model results.
 
@@ -11,7 +11,7 @@ sudo apt update
 sudo apt install -y git
 ```
 
-Follow the [Docker Engine installation guide for Ubuntu](https://docs.docker.com/engine/install/ubuntu/), which includes the Compose plugin. For another Linux distribution, use its corresponding Docker installation guide.
+Follow the [Docker Engine installation guide](https://docs.docker.com/engine/install/) for your machine, which includes the Compose plugin.
 
 Check that Docker is running and accessible:
 
@@ -19,8 +19,6 @@ Check that Docker is running and accessible:
 docker info
 docker compose version
 ```
-
-If you get a Docker socket permission error, follow the [Linux post-installation instructions](https://docs.docker.com/engine/install/linux-postinstall/) or run the Docker commands with `sudo`.
 
 ## 2. Clone the repository
 
