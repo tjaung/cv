@@ -5,8 +5,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ...patch_features import PatchData
-from ...feature_sets import feature_names, feature_version
+from CV.postprocessing.patch_features import PatchData
+from CV.features.feature_sets import feature_names, feature_version
 
 
 class PCAAnomalyDetector:

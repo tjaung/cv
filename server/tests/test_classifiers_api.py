@@ -6,7 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 import numpy as np
-from server.api import classifiers, models
+from server.api.classifiers import handlers as classifiers
+from server.api.anomaly_detection import models
 from CV.models.classifiers import PCAClassifier
 
 
@@ -36,7 +37,7 @@ class ClassifierAPITests(unittest.TestCase):
             configs = [dict(kind='pca', variance_target=.95, metric='euclidean'),
                        dict(kind='svm', variance_target=.95, kernel='linear', C=1.),
                        dict(kind='knn', variance_target=.95, n_neighbors=3, weights='distance')]
-            with patch('server.api.result_store.RESULTS_ROOT', root / 'results'), patch.object(classifiers, 'ROOT', root / 'artifacts'), patch.object(classifiers, 'folder_path', return_value=dataset), patch.object(models, '_submit', side_effect=submit), patch.object(PCAClassifier, 'extract_features', extract), patch.object(classifiers, 'configurations', return_value=configs):
+            with patch('server.api.shared.result_store.RESULTS_ROOT', root / 'results'), patch.object(classifiers, 'ROOT', root / 'artifacts'), patch.object(classifiers, 'folder_path', return_value=dataset), patch.object(models, '_submit', side_effect=submit), patch.object(PCAClassifier, 'extract_features', extract), patch.object(classifiers, 'configurations', return_value=configs):
                 self.assertIsNone(classifiers.list_classifiers()['summary'])
                 result = classifiers.train_classifiers(classifiers.TrainingRequest())
                 self.assertEqual(result['failures'], [])
@@ -121,7 +122,7 @@ class ClassifierAPITests(unittest.TestCase):
                     classifiers.inspect_classifier('../model', 0)
 
                 # All stored predictions and charts remain usable without artifacts.
-                from server.api import result_store as results
+                from server.api.shared import result_store as results
                 selected_id = summary['models'][0]['id']
                 results.save_selected_model(results.SaveModelRequest(family='classifiers', run_id=run_id, model_id=selected_id))
                 shutil.rmtree(classifiers.ROOT)

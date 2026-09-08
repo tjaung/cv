@@ -18,8 +18,8 @@ from CV.preprocessing.gaussian_blur import apply_gaussian_blur
 from CV.preprocessing.clahe import apply_clahe
 from CV.preprocessing.contrast import increase_contrast
 from CV.features import cielab_features, sobel_features, hog_from_gradients, frangi_features, frangi_descriptor
-from CV.models.patch_features import PatchData, CHANNELS
-from CV.models.feature_sets import extract_model_features, feature_signature, LAB_INDICES
+from CV.postprocessing.patch_features import PatchData, CHANNELS
+from CV.features.feature_sets import extract_model_features, feature_signature, LAB_INDICES
 
 PreprocessingVariant = Literal['full', 'normalized', 'raw']
 VARIANTS = ('full', 'normalized', 'raw')
@@ -93,7 +93,7 @@ def extract_anomaly_features(image, image_id='', patch_size=64, min_coverage=.5,
 
 def describe_input(plate, mask, image_id, patch_size, min_coverage, feature_set):
     """Same LAB/Sobel/HOG/Frangi descriptor schema as the existing full pipeline."""
-    from CV.models.feature_sets import feature_names
+    from CV.features.feature_sets import feature_names
     feature_names(feature_set)
     valid = cv2.erode(mask, np.ones((3, 3), np.uint8), borderType=cv2.BORDER_CONSTANT, borderValue=0) != 0
     lab, sobel = cielab_features(plate), sobel_features(plate)

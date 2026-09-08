@@ -298,3 +298,15 @@ export async function cnnAction(action: 'train' | 'test' | 'save', body: object)
   }
   return response.json()
 }
+
+export async function comparisonRequest<T>(path: string, body?: object, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}/comparison/${path}`, body === undefined ? { signal } : {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal,
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => null)
+    throw new Error(typeof data?.detail === 'string' ? data.detail : `Comparison request failed (${response.status})`)
+  }
+  return response.json()
+}
+export const comparisonImageUrl = (runId: string, index: number) => `${API_BASE_URL}/comparison/images/${encode(runId)}/${index}`

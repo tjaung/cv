@@ -13,7 +13,9 @@ import torch
 
 from CV.models.object_detection.patch_resnet import PatchResNet
 from CV.models.object_detection.multiclass_patch_resnet import MulticlassPatchResNet
-from server.api import cnn, models, result_store as results
+from server.api.cnn import handlers as cnn
+from server.api.anomaly_detection import models
+from server.api.shared import result_store as results
 from server.tests.test_models_api import request
 
 
@@ -37,7 +39,7 @@ class PatchCNNAPITests(unittest.TestCase):
                         mask = np.zeros((96, 96), np.uint8)
                         mask[3:5, 3:5] = 255
                         cv2.imwrite(str(mask_path), mask)
-            with patch('server.api.os_helpers.DATASET_ROOT', root / 'dataset'), \
+            with patch('server.api.shared.os_helpers.DATASET_ROOT', root / 'dataset'), \
                  patch.object(cnn, 'ARTIFACT_ROOT', root / 'artifacts'), \
                  patch.object(results, 'RESULTS_ROOT', root / 'results'), \
                  patch.object(cnn, '_device', return_value='cpu'), \

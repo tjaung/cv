@@ -5,7 +5,7 @@ import numpy as np
 from CV.models.anomaly_detection.inputs import (
     describe_input, extract_anomaly_features, input_signature, normalized_pipeline,
 )
-from CV.models.feature_sets import FEATURE_SETS, extract_model_features, feature_signature
+from CV.features.feature_sets import FEATURE_SETS, extract_model_features, feature_signature
 from CV.preprocessing import preprocess_plate, segment_plate
 from CV.preprocessing.luminance_correction import adjust_luminance_to_middle_by_percentage
 

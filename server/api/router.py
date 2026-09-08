@@ -1,79 +1,22 @@
-from .result_store import save_selected_model
-from .cnn import get_cnn, train_cnn, test_cnn, cnn_weights, cnn_predictions, cnn_inspect, save_cnn
-from .classifiers import get_classifier_patch_explanation
-from .classifiers import get_classifier_curves, train_classifier_curves
-from .classifiers import list_classifiers, train_classifiers, inspect_classifier, classify_review_image, get_classifier_training_metrics
-from .model_lifecycle import clear_models, retrain_all_models, download_history
-from .one_class_svm import train_svm_grid
-from fastapi import APIRouter, Response
+"""Register the feature routers consumed by server.main."""
+from fastapi import APIRouter
 
-from .models import get_model_projection, train_pca_sweep, evaluate_all_pca, get_models, get_pca_model, train_pca, test_pca, evaluate_pca, get_model_job, get_pca_features, download_pca_features
-from .features import get_features, get_feature_histograms
-from .api import get_image, get_image_sets, get_images, get_test_ground_truth
-from .preprocessing import get_preprocessing_steps, run_preprocessing_pipeline
+from .comparison.router import router as comparison_router
+from .cnn.router import router as cnn_router
+from .anomaly_detection.router import router as anomaly_detection_router
+from .features.router import router as features_router
+from .preprocessing.router import router as preprocessing_router
+from .dataset.router import router as dataset_router
+from .classifiers.router import router as classifiers_router
+from .shared.router import router as shared_router
 
 api_router = APIRouter()
 
-api_router.add_api_route('/cnn/', get_cnn, methods=['GET'], tags=['CNN'])
-api_router.add_api_route('/cnn/train/', train_cnn, methods=['POST'], tags=['CNN'])
-api_router.add_api_route('/cnn/test/', test_cnn, methods=['POST'], tags=['CNN'])
-api_router.add_api_route('/cnn/weights/', cnn_weights, methods=['GET'], tags=['CNN'])
-api_router.add_api_route('/cnn/predictions/', cnn_predictions, methods=['GET'], tags=['CNN'])
-api_router.add_api_route('/cnn/inspect/', cnn_inspect, methods=['GET'], tags=['CNN'])
-api_router.add_api_route('/cnn/save/', save_cnn, methods=['POST'], tags=['CNN'])
-
-api_router.add_api_route('/models/one_class_svm/grid/', train_svm_grid, methods=['POST'], tags=['Models'])
-api_router.add_api_route('/models/one_class_svm/', get_pca_model, methods=['GET'], tags=['Models'])
-api_router.add_api_route('/models/one_class_svm/test/', test_pca, methods=['POST'], tags=['Models'])
-api_router.add_api_route('/models/one_class_svm/evaluate/', evaluate_pca, methods=['POST'], tags=['Models'])
-
-api_router.add_api_route('/models/clear/', clear_models, methods=['POST'], tags=['Models'])
-api_router.add_api_route('/models/retrain_all/', retrain_all_models, methods=['POST'], tags=['Models'])
-api_router.add_api_route('/models/history/{model_id}', download_history, methods=['GET'], tags=['Models'])
-api_router.add_api_route('/models/projection/', get_model_projection, methods=['GET'], tags=['Models'])
-api_router.add_api_route('/models/', get_models, methods=['GET'], tags=['Models'])
-api_router.add_api_route('/models/jobs/{job_id}', get_model_job, methods=['GET'], tags=['Models'])
-api_router.add_api_route('/models/pca/', get_pca_model, methods=['GET'], tags=['Models'])
-api_router.add_api_route('/models/pca/sweep/', train_pca_sweep, methods=['POST'], tags=['Models'])
-api_router.add_api_route('/models/pca/evaluate_all/', evaluate_all_pca, methods=['POST'], tags=['Models'])
-api_router.add_api_route('/models/pca/train/', train_pca, methods=['POST'], tags=['Models'])
-api_router.add_api_route('/models/pca/test/', test_pca, methods=['POST'], tags=['Models'])
-api_router.add_api_route('/models/pca/evaluate/', evaluate_pca, methods=['POST'], tags=['Models'])
-api_router.add_api_route('/models/pca/features/', get_pca_features, methods=['GET'], tags=['Models'])
-api_router.add_api_route('/models/pca/download/', download_pca_features, methods=['GET'], tags=['Models'])
-
-api_router.add_api_route('/features/', get_features, methods=['GET'], tags=['Features'])
-api_router.add_api_route('/features/histograms/', get_feature_histograms, methods=['GET'], tags=['Features'])
-
-api_router.add_api_route('/preprocessing/steps/', get_preprocessing_steps, methods=['GET'], tags=['Preprocessing'])
-api_router.add_api_route(
-    '/preprocessing/pipeline/', run_preprocessing_pipeline, methods=['GET'],
-    tags=['Preprocessing'], response_class=Response,
-    responses={200: {'content': {'image/png': {}}}},
-)
-
-api_router.add_api_route("/image_sets", get_image_sets, methods=["GET"])
-api_router.add_api_route("/images/{image_set}/{split}", get_images, methods=["GET"])
-api_router.add_api_route(
-    "/images/{image_set}/{split}/{image_name:path}", get_image, methods=["GET"]
-)
-api_router.add_api_route(
-    "/test/ground_truth/{image_set}/{defect}/{image_name}",
-    get_test_ground_truth,
-    methods=["GET"],
-)
-
-api_router.add_api_route('/classifiers/', list_classifiers, methods=['GET'], tags=['Classifiers'])
-api_router.add_api_route('/classifiers/train/', train_classifiers, methods=['POST'], tags=['Classifiers'])
-api_router.add_api_route('/classifiers/inspect/', inspect_classifier, methods=['GET'], tags=['Classifiers'])
-
-api_router.add_api_route('/classifiers/review/', classify_review_image, methods=['GET'], tags=['Classifiers'])
-
-api_router.add_api_route('/classifiers/training_metrics/', get_classifier_training_metrics, methods=['GET'], tags=['Classifiers'])
-
-api_router.add_api_route('/classifiers/learning_curves/', get_classifier_curves, methods=['GET'], tags=['Classifiers'])
-api_router.add_api_route('/classifiers/learning_curves/', train_classifier_curves, methods=['POST'], tags=['Classifiers'])
-
-api_router.add_api_route('/classifiers/patch_explanation/', get_classifier_patch_explanation, methods=['GET'], tags=['Classifiers'])
-
-api_router.add_api_route('/results/save_model/', save_selected_model, methods=['POST'], tags=['Results'])
+api_router.include_router(comparison_router)
+api_router.include_router(cnn_router)
+api_router.include_router(anomaly_detection_router)
+api_router.include_router(features_router)
+api_router.include_router(preprocessing_router)
+api_router.include_router(dataset_router)
+api_router.include_router(classifiers_router)
+api_router.include_router(shared_router)

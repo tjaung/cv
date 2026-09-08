@@ -12,7 +12,7 @@ import cv2
 import numpy as np
 
 from server.main import app
-from server.api import models
+from server.api.anomaly_detection import models
 
 
 async def request(path, method='GET', query=None, body=None):
@@ -50,7 +50,7 @@ class ModelAPITests(unittest.TestCase):
             if label == 'rust':
                 sample[40:100, 40:100] = (20, 50, 160)
             cv2.imwrite(str(path), sample)
-        for target, value in [('server.api.os_helpers.DATASET_ROOT', dataset), ('server.api.models.ARTIFACT_ROOT', root / 'models'), ('server.api.result_store.RESULTS_ROOT', root / 'results')]:
+        for target, value in [('server.api.shared.os_helpers.DATASET_ROOT', dataset), ('server.api.anomaly_detection.models.ARTIFACT_ROOT', root / 'models'), ('server.api.shared.result_store.RESULTS_ROOT', root / 'results')]:
             patcher = patch(target, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -114,7 +114,7 @@ class ModelAPITests(unittest.TestCase):
         self.assertEqual(self.call('/models/pca/train/', 'POST', body={'patch_size': 1})[0], 422)
 
     def test_durable_results_and_selected_model_survive_artifact_deletion(self):
-        from server.api import result_store as results
+        from server.api.shared import result_store as results
         _, job = self.call('/models/pca/train/', 'POST', body={'patch_size': 32})
         model_id = self.finish(job['job_id'])['model_id']
         _, job = self.call('/models/pca/evaluate/', 'POST')
@@ -214,9 +214,9 @@ class ModelAPITests(unittest.TestCase):
     def test_complete_preprocessing_output_feeds_every_feature_path(self):
         from CV.preprocessing import preprocess_plate
         from CV.preprocessing.contrast import increase_contrast
-        from CV.models.feature_sets import extract_model_features
-        from server.api.features import _load
-        from server.api.os_helpers import image_path
+        from CV.features.feature_sets import extract_model_features
+        from server.api.features.handlers import _load
+        from server.api.shared.os_helpers import image_path
         path = image_path('metal_plate/test/rust/000.png')
         image = cv2.imread(str(path))
         result = preprocess_plate(image)
@@ -256,15 +256,15 @@ class ModelAPITests(unittest.TestCase):
             self.assertTrue(report['compatible'])
 
     def test_anomaly_pipeline_variants_are_saved_and_retrained_independently(self):
-        from server.api.model_lifecycle import catalog
+        from server.api.anomaly_detection.model_lifecycle import catalog
         from CV.models.anomaly_detection.inputs import input_signature
-        from server.api import result_store
+        from server.api.shared import result_store
         def small_catalog(preprocessing='full'):
             return {k: v for k, v in catalog(preprocessing).items()
                     if v['model_type'] == 'pca' and v['patch_size'] == 32
                     and v['variance_target'] == .95 and v['distance_metric'] == 'l2'}
         retained = {}
-        with patch('server.api.model_lifecycle.catalog', side_effect=small_catalog):
+        with patch('server.api.anomaly_detection.model_lifecycle.catalog', side_effect=small_catalog):
             for variant in ('full', 'normalized', 'raw', 'normalized'):
                 status, job = self.call('/models/retrain_all/', 'POST', body={'preprocessing': variant})
                 self.assertEqual(status, 200)
@@ -285,7 +285,7 @@ class ModelAPITests(unittest.TestCase):
                 with gzip.open(metrics, 'rt') as stream:
                     self.assertEqual(next(csv.DictReader(stream))['preprocessing'], variant)
                 model = models._model(str(models.ARTIFACT_ROOT / model_id))
-                from server.api.os_helpers import image_path
+                from server.api.shared.os_helpers import image_path
                 result, patches, *_ = model.test_image(cv2.imread(str(image_path('metal_plate/test/good/000.png'))))
                 self.assertTrue(len(result['patches']))
                 if variant == 'raw':
@@ -293,11 +293,11 @@ class ModelAPITests(unittest.TestCase):
             self.assertEqual(self.call('/models/retrain_all/', 'POST', body={'preprocessing': 'unknown'})[0], 422)
 
     def test_clear_preserves_history_and_retrain_replaces_models(self):
-        from server.api.model_lifecycle import catalog
+        from server.api.anomaly_detection.model_lifecycle import catalog
         subset = {k: v for k, v in catalog().items() if v['patch_size'] == 32 and v['variance_target'] == .95
                   and ((v['model_type'] == 'pca' and v['distance_metric'] == 'l2') or
                        (v['model_type'] == 'one_class_svm' and v['kernel'] == 'rbf' and v['nu'] == .05 and v['gamma'] == 'scale'))}
-        override = patch('server.api.model_lifecycle.catalog', return_value=subset)
+        override = patch('server.api.anomaly_detection.model_lifecycle.catalog', return_value=subset)
         override.start()
         self.addCleanup(override.stop)
         # Include a duplicate configuration and both families.
@@ -341,7 +341,7 @@ class ModelAPITests(unittest.TestCase):
         self.assertEqual(len(listing['history']), 5)
         self.assertFalse(any((models.ARTIFACT_ROOT / i).exists() for i in previous_ids))
         retained_ids = {r['model_id'] for r in listing['models']}
-        with patch('server.api.models._evaluate_pca', side_effect=ValueError('Evaluation failed')):
+        with patch('server.api.anomaly_detection.models._evaluate_pca', side_effect=ValueError('Evaluation failed')):
             _, job = self.call('/models/retrain_all/', 'POST')
             failed = self.finish(job['job_id'])
         self.assertEqual(len(failed['failures']), 2)
@@ -351,10 +351,10 @@ class ModelAPITests(unittest.TestCase):
         self.assertTrue((models.ARTIFACT_ROOT / json.loads((models.ARTIFACT_ROOT / 'current.json').read_text())['model_id']).exists())
 
     def test_parallel_retrain_and_failed_save_cleanup(self):
-        from server.api.model_lifecycle import catalog
+        from server.api.anomaly_detection.model_lifecycle import catalog
         subset = {k: v for k, v in catalog().items() if v['patch_size'] in (32, 64) and v['variance_target'] == .95
                   and v['model_type'] == 'pca' and v['distance_metric'] == 'l2'}
-        with patch('server.api.model_lifecycle.catalog', return_value=subset):
+        with patch('server.api.anomaly_detection.model_lifecycle.catalog', return_value=subset):
             _, job = self.call('/models/retrain_all/', 'POST')
             result = self.finish(job['job_id'])
             self.assertEqual(len(result['model_ids']), 2)
@@ -369,7 +369,7 @@ class ModelAPITests(unittest.TestCase):
             self.assertEqual(set(models.ARTIFACT_ROOT.iterdir()), before)
 
     def test_all_parameter_catalog_and_read_only_projection(self):
-        from server.api.model_lifecycle import catalog, recipe, recipe_key
+        from server.api.anomaly_detection.model_lifecycle import catalog, recipe, recipe_key
         recipes = list(catalog().values())
         self.assertEqual(len(recipes), 135)
         self.assertEqual(sum(r['model_type'] == 'pca' for r in recipes), 27)

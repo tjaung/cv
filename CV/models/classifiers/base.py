@@ -8,7 +8,7 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.validation import check_is_fitted
-from CV.models.feature_sets import extract_model_features, feature_names, feature_signature
+from CV.features.feature_sets import extract_model_features, feature_names, feature_signature
 
 FEATURE_SET = 'lab_sobel_hog_frangi'
 

@@ -1,0 +1,20 @@
+import Writeup from '../../components/Writeup'
+
+export function ClassifiersWriteup() {
+  return <Writeup title="Classical Classifiers">
+    <p>The anomaly detection had only one model that had decent performance, and I knew I could do better. I wanted to see how much it would help to train with examples of the defects too. I think using these classical techniques, but really learning the embedded space for the defects can make up for the weaknesses in the anomaly detection models. I combined the images from the original train and test folders and made a new split of about 80% training and 20% testing, keeping each class represented and identical image content on the same side. With seed 42, this gave me 120 training images and 31 test images. I used five fold cross validation within the training set to compare parameters, keeping the test images out of that process.</p>
+    <p>I tried PCA with a nearest centroid classifier, SVM, and KNN to predict good, major rust, scratches, or total rust. They use the full preprocessing pipeline (without normalization) and the same LAB, Sobel, HOG, and Frangi features. I still extract features from regions so that local texture and color patterns are captured, then combine the patch vectors using their mean and standard deviation for an overall image prediction.</p>
+    <p>These models generally did much better in my testing. In the earlier run with normalization, the median test accuracy across 42 configurations was 90.3%, and nine configurations correctly classified all 31 test images. After removing normalization and retraining, the median fell to 87.1%, with five configurations getting all 31 right. Some configurations may benefit, but the results do not show an overall improvement for classifiers. The table below shows the best observed test accuracy for each model type, rather than a model chosen only by cross validation.</p>
+    <div className="model-table-scroll"><table>
+      <caption>Best observed classifier results without luminance normalization · 31 image holdout</caption>
+      <thead><tr><th>Model / configuration</th><th>Correct / total</th><th>Scratch recall</th><th>Good plates rejected</th></tr></thead>
+      <tbody>
+        <tr><th>PCA · 90% variance, Manhattan distance</th><td>28 / 31 (90.3%)</td><td>6 / 7 (85.7%)</td><td>2 / 16</td></tr>
+        <tr><th>SVM · 90% variance, linear, C = 0.1</th><td>31 / 31 (100%)</td><td>7 / 7 (100%)</td><td>0 / 16</td></tr>
+        <tr><th>KNN · 99% variance, 5 neighbors, uniform weighting</th><td>29 / 31 (93.5%)</td><td>6 / 7 (85.7%)</td><td>1 / 16</td></tr>
+      </tbody>
+    </table></div>
+    <p>Scratches were still an issue for some configurations. Both the PCA and KNN examples above passed one scratched plate as good, while the PCA example rejected two good plates and KNN rejected one. The best observed accuracy fell from 29/31 to 28/31 for PCA and from 30/31 to 29/31 for KNN, while SVM stayed at 31/31. Learning from defect examples looks promising, but this is a different task from anomaly detection. These models learn all four classes and are tested on 31 images, while the anomaly models make good/bad decisions on 97 images. The results are encouraging, but not a direct comparison under identical conditions.</p>
+    <p>I also wanted to inspect which regions contributed to a decision. Here, the highlighted patches show how removing a patch changes the score for the predicted class. They are explanations of the whole image decision, not independently classified defect regions. If you go through the results of defect predictions, you will find that a lot of highlighted regions are for the hook its on, which is obviously not a good signal of the plate itself being good or bad. These models while much better at classifying plates into their classes, are harder to explain why they made their predictions, and if I had a case where I would want to flag what part of the plate was bad, these models clearly don't do that well.</p>
+  </Writeup>
+}

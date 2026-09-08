@@ -1,5 +1,29 @@
 # Anomaly Dataset API
 
+## Server layout
+
+`main.py` creates the FastAPI app and includes `api/router.py`. The central
+router includes each feature's `router.py`, which registers that feature's
+existing endpoint URLs.
+
+```text
+server/api/
+  router.py
+  dataset/             # Image browsing and ground truth
+  preprocessing/       # Pipeline steps and previews
+  features/            # Feature images and histograms
+  anomaly_detection/   # PCA, one class SVM, jobs, and model lifecycle
+  classifiers/         # Supervised models, evaluations, and explanations
+  cnn/                 # Whole plate and patch CNN endpoints
+  comparison/          # Saved model loading and timed random evaluations
+  shared/              # Dataset paths, result storage, and model saving
+```
+
+Feature folders contain endpoint handlers and a router. CNN patch processing
+lives beside the CNN handlers. Tests are in `server/tests/`. Data, artifacts,
+and saved results retain their existing locations. Both launch commands below
+remain supported.
+
 From the repository root:
 
 ```sh

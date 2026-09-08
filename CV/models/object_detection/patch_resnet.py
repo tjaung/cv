@@ -12,7 +12,7 @@ from torchvision.models import resnet18, ResNet18_Weights
 from sklearn.metrics import classification_report, confusion_matrix
 
 from CV.preprocessing import segment_plate
-from CV.models.patch_geometry import patch_boxes
+from CV.postprocessing.patch_geometry import patch_boxes
 from .resnet import PlateResNet
 
 CLASSES = ('good', 'defect')

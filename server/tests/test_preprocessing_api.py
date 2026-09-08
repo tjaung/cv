@@ -36,7 +36,7 @@ class PreprocessingPipelineTests(unittest.TestCase):
             image = np.full((140, 140, 3), 220, np.uint8)
             image[20:120, 20:120] = (90, 40, 20)
             cv2.imwrite(str(path), image)
-            with patch('server.api.os_helpers.DATASET_ROOT', root):
+            with patch('server.api.shared.os_helpers.DATASET_ROOT', root):
                 def get(pipeline, step=None):
                     query = {'image_path': 'metal_plate/train/good/000.png', 'pipeline': pipeline}
                     if step is not None:
@@ -47,9 +47,9 @@ class PreprocessingPipelineTests(unittest.TestCase):
                     status, body = get('normalized', step)
                     self.assertEqual(status, 200)
                     np.testing.assert_array_equal(cv2.imdecode(np.frombuffer(body, np.uint8), 1), expected)
-                with patch('server.api.preprocessing.segment_plate', side_effect=AssertionError), \
-                     patch('server.api.preprocessing.preprocess_plate', side_effect=AssertionError), \
-                     patch('server.api.preprocessing.normalized_pipeline', side_effect=AssertionError):
+                with patch('server.api.preprocessing.handlers.segment_plate', side_effect=AssertionError), \
+                     patch('server.api.preprocessing.handlers.preprocess_plate', side_effect=AssertionError), \
+                     patch('server.api.preprocessing.handlers.normalized_pipeline', side_effect=AssertionError):
                     status, body = get('raw')
                     self.assertEqual(status, 200)
                     np.testing.assert_array_equal(cv2.imdecode(np.frombuffer(body, np.uint8), 1), image)
@@ -71,7 +71,7 @@ class PreprocessingPipelineTests(unittest.TestCase):
             result = SimpleNamespace(gray=gray, blurred=gray, edge_bold=gray,
                                      threshold=100., threshold_mask=mask, cleaned_mask=mask,
                                      plate_mask=mask, plate=raw)
-            with patch('server.api.os_helpers.DATASET_ROOT', root):
+            with patch('server.api.shared.os_helpers.DATASET_ROOT', root):
                 def get(query):
                     return asyncio.run(request('/preprocessing/pipeline/', query={'image_path': 'metal_plate/train/good/000.png', **query}))
                 for pipeline, count, last in [('segmentation', 9, 'Patch extraction'), ('full', 15, 'Contrast / final plate')]:
@@ -80,8 +80,8 @@ class PreprocessingPipelineTests(unittest.TestCase):
                     steps = json.loads(body)['steps']
                     self.assertEqual(len(steps), count)
                     self.assertEqual(steps[-1]['name'], last)
-                with patch('server.api.preprocessing.segment_plate', return_value=result), \
-                     patch('server.api.preprocessing.preprocess_plate', side_effect=AssertionError('Segmentation must not run glare repair')):
+                with patch('server.api.preprocessing.handlers.segment_plate', return_value=result), \
+                     patch('server.api.preprocessing.handlers.preprocess_plate', side_effect=AssertionError('Segmentation must not run glare repair')):
                     status, body = get({'pipeline': 'segmentation', 'step': 7})
                     self.assertEqual(status, 200)
                     np.testing.assert_array_equal(cv2.imdecode(np.frombuffer(body, np.uint8), 1), raw)

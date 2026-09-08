@@ -12,7 +12,11 @@ import cv2
 import numpy as np
 import torch
 
-from server.api import cnn, models, result_store as results
+from server.api.cnn import handlers as cnn
+
+from server.api.anomaly_detection import models
+
+from server.api.shared import result_store as results
 from server.tests.test_models_api import request
 from CV.models.object_detection.resnet import PlateResNet
 
@@ -31,7 +35,7 @@ class CNNAPITests(unittest.TestCase):
                     path.parent.mkdir(parents=True)
                     image = np.random.default_rng(i + (10 if split == 'test' else 0)).integers(20, 200, (48, 48, 3), dtype=np.uint8)
                     cv2.imwrite(str(path), image)
-            with patch('server.api.os_helpers.DATASET_ROOT', dataset), \
+            with patch('server.api.shared.os_helpers.DATASET_ROOT', dataset), \
                  patch.object(cnn, 'ARTIFACT_ROOT', root / 'artifacts'), \
                  patch.object(results, 'RESULTS_ROOT', root / 'results'), \
                  patch.object(cnn, '_device', return_value='cpu'), \
