@@ -1,0 +1,37 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    ports:
+      - "127.0.0.1:${SERVER_PORT:-8000}:8000"
+    volumes:
+      - type: bind
+        source: ./server/anomaly_dataset
+        target: /app/server/anomaly_dataset
+        read_only: true
+        bind:
+          create_host_path: false
+      - ./CV/results:/app/CV/results
+      - ./artifacts:/app/artifacts
+      - torch-cache:/root/.cache/torch
+    shm_size: "1gb"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      retries: 6
+      start_period: 30s
+
+  client:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    ports:
+      - "127.0.0.1:${CLIENT_PORT:-5173}:80"
+    depends_on:
+      server:
+        condition: service_healthy
+
+volumes:
+  torch-cache:

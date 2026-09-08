@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "metal-plate-cv"
+version = "0.1.0"
+description = "Reusable metal-plate preprocessing algorithms"
+requires-python = ">=3.10"
+dependencies = ["numpy>=2,<3", "opencv-python>=4.10,<6", "scikit-learn>=1.7,<2", "scipy>=1.11,<2", "threadpoolctl>=3.1,<4", "joblib>=1.2,<2"]
+
+[project.optional-dependencies]
+cnn = ["torch>=2.6,<3", "torchvision>=0.21,<1", "Pillow>=10"]
+plot = ["matplotlib>=3.8,<4"]
+
+[project.scripts]
+preprocess-plate = "CV.preprocessing.preprocessing:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["CV", "CV.*"]
+exclude = ["CV.*.tests", "CV.*.tests.*"]
+namespaces = false

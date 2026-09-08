@@ -1,0 +1,12 @@
+import type { ImageFeatures } from '../../api'
+
+export default function HOGView({ data }: { data: ImageFeatures['hog'] }) {
+  return <section className="hog-view"><h3 className="distribution-heading">HOG · local edge structure</h3>
+    <p className="feature-note">Sobel gradients → 4×4 cells → nine unsigned orientations → overlapping 2×2-cell blocks → L2-Hys normalization. Each block is normalized, clipped at 0.2, then normalized again. The descriptor contains 324 values. Pixels outside the plate and its one-pixel boundary do not vote.</p>
+    <div className="model-inspection"><figure className="feature-card"><img style={{ width: '100%', maxHeight: 400, objectFit: 'contain' }} src={data.image} alt="HOG gradient orientation glyphs" /><figcaption>Line directions show gradient normals, perpendicular to edges; brightness shows normalized strength. Display brightness is scaled per image.</figcaption></figure>
+      <article className="model-chart"><h3>HOG orientation summary</h3><svg viewBox="0 0 500 250" role="img" aria-label="HOG block-normalized orientation histogram">{data.histogram.map((value, i) => <g key={i}><rect x={45 + i * 48} y={205 - value * 180} width="30" height={value * 180} fill="#278568"><title>{i * 20}°: {(value * 100).toFixed(2)}%</title></rect><text x={60 + i * 48} y="226" textAnchor="middle">{i * 20}°</text></g>)}<text x="30" y="20">Normalized weight · 0–100% scale</text></svg><p>{data.valid_pixels.toLocaleString()} valid plate pixels. Opposite gradients share the same orientation bin.</p></article>
+    </div>
+    <details className="model-all-weights"><summary>HOG cell histogram matrix (16 cells × 9 bins)</summary><div className="model-table-scroll"><table><thead><tr><th>Cell</th>{Array.from({ length: 9 }, (_, i) => <th key={i}>{i * 20}°</th>)}</tr></thead><tbody>{data.cells.flatMap((row, y) => row.map((values, x) => <tr key={`${y}:${x}`}><th>{y + 1}, {x + 1}</th>{values.map((v, i) => <td key={i}>{v.toFixed(3)}</td>)}</tr>))}</tbody></table></div><p>Raw magnitude-weighted votes before block normalization.</p></details>
+    <details className="model-all-weights"><summary>Complete normalized HOG descriptor ({data.descriptor.length} values)</summary><div className="model-table-scroll"><table><thead><tr><th>Index</th><th>Weight</th></tr></thead><tbody>{data.descriptor.map((v, i) => <tr key={i}><td>{i}</td><td>{v.toFixed(6)}</td></tr>)}</tbody></table></div><p>Order: block row, block column, cell row, cell column, orientation bin.</p></details>
+  </section>
+}
