@@ -1,3 +1,4 @@
+import { ClassifiersWriteup } from './ModelWriteups'
 import { useEffect, useState } from 'react'
 import SaveModelButton from './SaveModelButton'
 import ClassifierPatchImage from './ClassifierPatchImage'
@@ -169,7 +170,7 @@ export default function Classifiers() {
     catch(e) { setError(String(e)) } finally { setBusy(false) }
   }
   const header = (key: string, label: string) => <th key={key}><button onClick={() => setSort((s) => ({ key, descending: s.key === key ? !s.descending : true }))}>{label}{sort.key === key ? sort.descending ? ' ↓' : ' ↑' : ''}</button></th>
-  return <section><div className="page-intro"><h2>Classifiers</h2><p>Predict good plates and each defect class using LAB, Sobel, HOG, and Frangi. A shared mixed 80/20 split keeps the holdout separate from cross-validation. Seed 42 · 64-pixel patches · 918 pooled image features.</p></div>
+  return <section><div className="page-intro model-writeup-intro"><h2>Classifiers</h2><ClassifiersWriteup /></div>
     <div className="panel model-training"><button disabled={busy || !!job} onClick={() => void train()}>Train all classifiers ({data?.configurations ?? 42})</button><p>PCA: 90/95/99% variance × Euclidean/Manhattan centroids. SVM: same variances × linear/RBF × C 0.1/1/10. KNN: same variances × 3/5/9 neighbors × uniform/distance weights. CSVs and plot data are saved in CV/results/data. Use Save model to keep selected fitted models in CV/results/models before deleting artifacts.</p></div>
     {error && <p className="panel empty" role="alert">{error}</p>}
     {job && <p className="panel model-progress" role="status">{job.phase} · {job.done}/{job.total}{job.combinations ? ` · ${job.combination}/${job.combinations} combinations processed` : ''}</p>}

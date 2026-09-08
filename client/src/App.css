@@ -74,11 +74,13 @@ h2 { font-size: 14px; font-weight: 600; }
 .app-tabs a:hover { background: #eaf1ed; }
 a:focus-visible { outline: 3px solid #278568; outline-offset: -3px; }
 .page-intro { margin-bottom: 24px; max-width: 900px; }
-.page-intro.preprocessing-intro, .page-intro.features-intro { max-width: none; width: 100%; }
+.page-intro.preprocessing-intro, .page-intro.features-intro, .page-intro.model-writeup-intro, .page-intro.dataset-intro { max-width: none; width: 100%; }
 .page-intro h2 { font-size: 25px; letter-spacing: -.5px; margin-bottom: 10px; }
 .page-intro > p:not(.eyebrow) { color: #718079; font-size: 14px; margin-top: 8px; }
 h3 { font-size: 14px; font-weight: 600; margin: 0; }
-.overview-content { padding: 28px; max-width: 900px; }
+.overview-content { padding: 28px; width: 100%; }
+.overview-content > summary { cursor: pointer; font-size: 18px; font-weight: 600; }
+.overview-summary { margin-top: 24px; line-height: 1.7; }
 .overview-content > p { font-size: 14px; color: #718079; }
 .contents-list { list-style: none; counter-reset: contents; padding: 0; margin: 20px 0 28px; }
 .contents-list li { counter-increment: contents; }
@@ -344,3 +346,10 @@ tr[aria-selected="true"] { background: #edf5ef; }
 .writeup-figures img { display: block; width: 100%; height: auto; border: 1px solid #e2eae5; border-radius: 6px; }
 .writeup-figures figcaption { margin-top: 8px; color: #718079; font-size: 13px; }
 @media (max-width: 700px) { .writeup-pipelines, .writeup-figures { grid-template-columns: 1fr; } }
+
+.workflow-diagram { margin: 24px 0; }
+.workflow-diagram figcaption { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+.workflow-scroll { overflow-x: auto; }
+.workflow-diagram svg { display: block; width: 100%; min-width: 850px; }
+.workflow-stage { fill: #26332f; font-size: 15px; font-weight: 600; }
+.workflow-label { fill: #526c5e; font-size: 13px; }

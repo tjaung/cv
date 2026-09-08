@@ -133,7 +133,7 @@ class ModelAPITests(unittest.TestCase):
         self.assertEqual(models.get_pca_model(model_id), detail)
         self.assertEqual(models.get_model_projection(image_path, model_id), projection)
         self.assertEqual(models._directory(model_id), results.saved_root('anomaly') / model_id)
-        self.assertTrue((results.data_root('anomaly') / model_id / 'predictions.csv').exists())
+        self.assertTrue((results.data_root('anomaly') / model_id / 'predictions.csv.gz').exists())
 
     def test_sweep_keeps_every_run_and_evaluates_each_metric(self):
         status, job = self.call('/models/pca/sweep/', 'POST', body={
@@ -239,6 +239,58 @@ class ModelAPITests(unittest.TestCase):
         np.testing.assert_array_equal(cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR), result.final_plate)
         status, _ = self.call('/preprocessing/pipeline/', query={'image_path': 'metal_plate/test/rust/000.png', 'contrast_factor': .5})
         self.assertEqual(status, 422)
+
+    def test_svm_grid_uses_selected_anomaly_pipeline(self):
+        for variant in ('normalized', 'raw'):
+            status, job = self.call('/models/one_class_svm/grid/', 'POST', body={
+                'preprocessing': variant, 'patch_size': 32, 'kernels': ['rbf'], 'nus': [.05], 'gammas': ['scale']})
+            self.assertEqual(status, 200)
+            result = self.finish(job['job_id'])
+            self.assertEqual(result['failures'], [])
+            model_id = result['model_ids'][0]
+            _, detail = self.call('/models/pca/', query={'model_id': model_id})
+            self.assertEqual(detail['config']['preprocessing'], variant)
+            _, listing = self.call('/models/')
+            report = next(r for r in listing['models'] if r['model_id'] == model_id)
+            self.assertEqual(report['evaluation']['images'], 2)
+            self.assertTrue(report['compatible'])
+
+    def test_anomaly_pipeline_variants_are_saved_and_retrained_independently(self):
+        from server.api.model_lifecycle import catalog
+        from CV.models.anomaly_detection.inputs import input_signature
+        from server.api import result_store
+        def small_catalog(preprocessing='full'):
+            return {k: v for k, v in catalog(preprocessing).items()
+                    if v['model_type'] == 'pca' and v['patch_size'] == 32
+                    and v['variance_target'] == .95 and v['distance_metric'] == 'l2'}
+        retained = {}
+        with patch('server.api.model_lifecycle.catalog', side_effect=small_catalog):
+            for variant in ('full', 'normalized', 'raw', 'normalized'):
+                status, job = self.call('/models/retrain_all/', 'POST', body={'preprocessing': variant})
+                self.assertEqual(status, 200)
+                result = self.finish(job['job_id'])
+                self.assertEqual(result['failures'], [])
+                model_id = result['model_ids'][0]
+                retained[variant] = model_id
+                _, listing = self.call('/models/')
+                fitted = [r for r in listing['models'] if r['model_available']]
+                self.assertEqual({r['model_id'] for r in fitted}, set(retained.values()))
+                report = next(r for r in fitted if r['model_id'] == model_id)
+                self.assertEqual(report['config']['preprocessing'], variant)
+                self.assertTrue(report['compatible'])
+                self.assertEqual(report['config']['pipeline_signature'], input_signature('lab_sobel_hog_frangi', variant))
+                metrics = result_store.data_root('anomaly') / model_id / 'metrics.csv.gz'
+                import csv
+                import gzip
+                with gzip.open(metrics, 'rt') as stream:
+                    self.assertEqual(next(csv.DictReader(stream))['preprocessing'], variant)
+                model = models._model(str(models.ARTIFACT_ROOT / model_id))
+                from server.api.os_helpers import image_path
+                result, patches, *_ = model.test_image(cv2.imread(str(image_path('metal_plate/test/good/000.png'))))
+                self.assertTrue(len(result['patches']))
+                if variant == 'raw':
+                    self.assertTrue((patches.mask == 255).all())
+            self.assertEqual(self.call('/models/retrain_all/', 'POST', body={'preprocessing': 'unknown'})[0], 422)
 
     def test_clear_preserves_history_and_retrain_replaces_models(self):
         from server.api.model_lifecycle import catalog

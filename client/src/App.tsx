@@ -5,6 +5,7 @@ import Features from './Features'
 import Models from './Models'
 import Classifiers from './Classifiers'
 import CNN from './CNN'
+import WorkflowDiagram from './WorkflowDiagram'
 import './App.css'
 
 const tabs = [
@@ -24,9 +25,9 @@ function currentTab() {
 
 function Overview() {
   return <section className="overview">
-    <div className="page-intro"><h2>Explore the dataset, one step at a time.</h2><p>Inspect the source images, compare defects with their ground-truth masks, and see how classical preprocessing isolates each metal plate.</p></div>
-    <div className="panel overview-content">
-      <h3>Table of contents</h3>
+    <div className="page-intro"><h2>Assignment Overview</h2></div>
+    <details className="panel overview-content">
+      <summary>Table of contents</summary>
       <ol className="contents-list">
         <li><a href="#dataset"><strong>Dataset viewer <span aria-hidden="true">→</span></strong><span>Browse folders, switch between grid and single images, and overlay ground truth.</span></a></li>
         <li><a href="#preprocessing"><strong>Preprocessing <span aria-hidden="true">→</span></strong><span>Explore training and test metal plates through normalization, thresholding, cleanup, and masking.</span></a></li>
@@ -35,8 +36,16 @@ function Overview() {
         <li><a href="#classifiers"><strong>Classifiers →</strong><span>Compare supervised PCA, SVM, and KNN on a mixed 80/20 split.</span></a></li>
         <li><a href="#cnn"><strong>CNN →</strong><span>Train ResNet-18 on segmented plates, compare class metrics, and inspect learned filters and predictions.</span></a></li>
       </ol>
-      <p>The preprocessing workflow uses a blurred grayscale copy with darkened edges to find the plate. The final mask is applied to the normalized color image so surface detail remains visible. Inspect bright-region masks and try glare removal using surrounding-color fill and boundary blending.</p>
-    </div>
+    </details>
+    <article className="panel overview-content overview-summary">
+      <h1>READ ME</h1>
+      <p>This webpage is my lab notebook for tools to help me create my final models, as well as for documenting my work and thought process for this problem. This lab notebook is not my primary submission either. I made this fullstack tool just to help me visualize the images, steps, and results. As a result, this client and server are AI slop and I don't want to be evaluated on the quality of the architecture and code for this app. With this notebook, I am trying to highlight my thought process and show my ML/AI workflow since that is relevant to the role.</p>
+      <p>Each tab in consecutive order shows each step I took to reach my final model and conclusion. While I wish that it was as simple as:</p>
+      <WorkflowDiagram />
+      <p>The workflow was more like:</p>
+      <WorkflowDiagram iterative />
+      <p>I try to explain in each tab why I had to go back to a previous step.</p>
+    </article>
   </section>
 }
 

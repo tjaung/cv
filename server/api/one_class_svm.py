@@ -5,10 +5,12 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from CV.models import OneClassSVMDetector
+from CV.models.anomaly_detection.inputs import PreprocessingVariant
 from . import models
 
 
 class SVMGridRequest(BaseModel):
+    preprocessing: PreprocessingVariant = 'full'
     feature_set: Literal['lab_sobel_hog_frangi'] = 'lab_sobel_hog_frangi'
     patch_size: int = Field(default=64, ge=16, le=256)
     variance_target: float = Field(default=.95, gt=0, lt=1)
@@ -34,8 +36,8 @@ def train_svm_grid(body: SVMGridRequest):
                 models._jobs[job_id].update(combination=index + 1, combinations=len(combinations))
             try:
                 trained = models._train_pca(models.TrainRequest(patch_size=body.patch_size,
-                    variance_target=body.variance_target, seed=body.seed, feature_set=body.feature_set), job_id, cache,
-                    model_factory=lambda: OneClassSVMDetector(body.variance_target, body.patch_size, nu, kernel, gamma, feature_set=body.feature_set))
+                    variance_target=body.variance_target, seed=body.seed, feature_set=body.feature_set, preprocessing=body.preprocessing), job_id, cache,
+                    model_factory=lambda: OneClassSVMDetector(body.variance_target, body.patch_size, nu, kernel, gamma, feature_set=body.feature_set, preprocessing=body.preprocessing))
                 models._evaluate_pca(trained['model_id'], job_id, cache)
                 completed.append(trained['model_id'])
             except ValueError as error:

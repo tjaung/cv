@@ -47,7 +47,8 @@ def write_csv(path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
     columns = list(dict.fromkeys(k for row in rows for k in row))
     temp = path.with_name(path.name + '.tmp')
-    with temp.open('w', newline='') as stream:
+    opener = gzip.open(temp, 'wt', newline='', compresslevel=1) if path.suffix == '.gz' else temp.open('w', newline='')
+    with opener as stream:
         writer = csv.DictWriter(stream, fieldnames=columns)
         writer.writeheader()
         writer.writerows({k: json.dumps(v) if isinstance(v, (dict, list)) else v for k,v in row.items()} for row in rows)
@@ -65,7 +66,7 @@ def anomaly_projection_path(model_id, image_path):
 def export_anomaly_projection(model_id, image_path, result):
     path = anomaly_projection_path(model_id, image_path)
     write_json(path, {**result, 'model_id': model_id, 'image_id': image_path})
-    write_csv(path.with_suffix('').with_suffix('.csv'),
+    write_csv(path.with_suffix('').with_suffix('.csv.gz'),
               [{'model_id': model_id, 'image_id': image_path, **row} for row in result['patches']])
 
 
@@ -79,17 +80,17 @@ def export_anomaly_model(model, report):
         detail[key] = values[::max(1, int(np.ceil(len(values)/1600))) ]
     write_json(destination / 'detail.json.gz', detail)
     write_json(destination / 'report.json', report)
-    write_csv(destination / 'metrics.csv', [{**report['config'], **{k:v for k,v in report.items() if k not in ('config','manifest','skipped')}}])
-    write_csv(destination / 'components.csv', [{'component': i+1, 'variance_ratio': model.explained_ratio[i], **dict(zip(model.feature_names, weights.tolist()))} for i,weights in enumerate(model.components)])
+    write_csv(destination / 'metrics.csv.gz', [{**report['config'], **{k:v for k,v in report.items() if k not in ('config','manifest','skipped')}}])
+    write_csv(destination / 'components.csv.gz', [{'component': i+1, 'variance_ratio': model.explained_ratio[i], **dict(zip(model.feature_names, weights.tolist()))} for i,weights in enumerate(model.components)])
     for split in ('training', 'calibration'):
-        write_csv(destination / f'{split}_plot.csv', [{**{k:v for k,v in p.items() if k != 'scores'}, **{f'PC{i+1}': v for i,v in enumerate(p['scores'])}} for p in detail[f'{split}_points']])
+        write_csv(destination / f'{split}_plot.csv.gz', [{**{k:v for k,v in p.items() if k != 'scores'}, **{f'PC{i+1}': v for i,v in enumerate(p['scores'])}} for p in detail[f'{split}_points']])
 
 
 def export_anomaly_evaluation(model_id, evaluation):
     destination = data_root('anomaly') / model_id
     write_json(destination / 'evaluation.json', evaluation)
-    write_csv(destination / 'predictions.csv', evaluation['rows'])
-    write_csv(destination / 'evaluation_metrics.csv', [{k:v for k,v in evaluation.items() if k not in ('rows','skipped','groups')}])
+    write_csv(destination / 'predictions.csv.gz', evaluation['rows'])
+    write_csv(destination / 'evaluation_metrics.csv.gz', [{k:v for k,v in evaluation.items() if k not in ('rows','skipped','groups')}])
 
 
 def export_classifier_summary(directory, summary):

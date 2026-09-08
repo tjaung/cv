@@ -14,6 +14,12 @@ from fastapi.responses import FileResponse
 
 from CV.models import OneClassSVMDetector, PCAAnomalyDetector
 from . import models
+from CV.models.anomaly_detection.inputs import PreprocessingVariant
+from pydantic import BaseModel
+
+
+class RetrainRequest(BaseModel):
+    preprocessing: PreprocessingVariant = "full"
 
 
 def _write(path, value):
@@ -27,7 +33,7 @@ def recipe(report):
     config = report['config']
     value = dict(model_type=config.get('model_type', 'pca'), patch_size=config['patch_size'],
                  variance_target=config['variance_target'], feature_set='lab_sobel_hog_frangi',
-                 seed=report.get('seed', 42), min_coverage=config.get('min_coverage', .5))
+                 seed=report.get('seed', 42), min_coverage=config.get('min_coverage', .5), preprocessing=config.get('preprocessing', 'full'))
     if value['model_type'] == 'one_class_svm':
         value.update(kernel=config['kernel'], nu=config['nu'], gamma=config['gamma'])
     else:
@@ -41,12 +47,12 @@ def recipe_key(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
-def catalog():
+def catalog(preprocessing='full'):
     # Full supported grid, independent of which configurations were trained
     # before. Feature subsets and equivalent legacy squared-L2 runs collapse.
     saved = {}
     for patch, variance in product((32, 64, 128), (.9, .95, .99)):
-        base = dict(patch_size=patch, variance_target=variance, feature_set='lab_sobel_hog_frangi', seed=42, min_coverage=.5)
+        base = dict(patch_size=patch, variance_target=variance, feature_set='lab_sobel_hog_frangi', seed=42, min_coverage=.5, preprocessing=preprocessing)
         for metric in ('l1', 'l2', 'mahalanobis'):
             value = dict(base, model_type='pca', distance_metric=metric)
             saved[recipe_key(value)] = value
@@ -101,9 +107,9 @@ def clear_models():
     return {'removed': len(directories), 'configurations': len(saved), 'history_records': len(history())}
 
 
-def retrain_all_models():
+def retrain_all_models(body: RetrainRequest = RetrainRequest()):
     def run(job_id):
-        saved = catalog()
+        saved = catalog(body.preprocessing)
         if not saved:
             raise ValueError('No saved model configurations. Train a parameter grid first.')
         _write(models.ARTIFACT_ROOT / 'recipes.json', saved)
@@ -125,16 +131,16 @@ def retrain_all_models():
             new_id = None
             try:
                 body = models.TrainRequest(patch_size=parameters['patch_size'], variance_target=parameters['variance_target'],
-                                           feature_set=parameters['feature_set'], seed=parameters['seed'])
+                                           feature_set=parameters['feature_set'], seed=parameters['seed'], preprocessing=parameters['preprocessing'])
                 def factory():
                     if parameters['model_type'] == 'one_class_svm':
                         detector = OneClassSVMDetector(parameters['variance_target'], parameters['patch_size'], parameters['nu'],
                                                       parameters['kernel'], parameters['gamma'] if parameters['kernel'] == 'rbf' else 'scale',
-                                                      feature_set=parameters['feature_set'])
+                                                      feature_set=parameters['feature_set'], preprocessing=parameters['preprocessing'])
                         detector.config['min_coverage'] = parameters['min_coverage']
                         return detector
                     return PCAAnomalyDetector(parameters['variance_target'], parameters['patch_size'], parameters['min_coverage'],
-                                              parameters['distance_metric'], parameters['feature_set'])
+                                              parameters['distance_metric'], parameters['feature_set'], preprocessing=parameters['preprocessing'])
                 new_id = models._train_pca(body, job_id, cache, model_factory=factory, publish=False)['model_id']
                 result = models._evaluate_pca(new_id, job_id, cache)
                 if not result['images']:

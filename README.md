@@ -1,18 +1,31 @@
-# Features and Model
+I ran a couple different tests, verifying visually. I ended up landing on this pipeline:
 
-I decided to use Sobel gradients with magnitude and direction as well as LAB values. These features alone seem like they can capture most of the information that I need for anomaly detection. I tried HSV and local binary patterns. HSV did not have as large of a differentiation across classes and local binary patterns seemed to show less information than Sobel features.
+Segment out the plate
 
+Greyscale
+Gaussian blur
+Sobel kernel edge darkening
+ISODATA Algorithm
+Morphological processing
+Segment out the plate
+Pre Process the plate
 
-The first baseline model I have is a PCA embedding. Its pretty simple. It uses the training data (with some withheld for validation) and gets the feature vectors. It then uses the validation set to get some margin of error. Using some error threshold of percentile, I can calculate squared Euclidean distance and Mahalanois distance to find if a given images featues are within the acceptable range.
+Plate Greyscale
+Glare threshold
+Fill glare mask with surrounding colors
+Blur
+CLAHE
 
-I also made a one class SVM for anomaly detection. I use grid search to train a bunch of models of a set of parameters.
+These two steps are used for my models that I try out. The full pipeline with manually created featuers are for the linear classifiers for anomaly detection and classification. The CNN approach only uses up until the segmented out plate. The reason for this is because I wanted to experiment with CNN to see what kind of features it would learn.
 
-It turns out that all of the models label good data as good, and all rust images as bad. They all fail on scratches, which is what I feared since the beginning. Looking at the PCA components, most of the variance is described by magnitude. This is great for rust, but it does not pick up enough detail lighter scratches and scratch patches. The scratches that do get flagged as bad are deeper scratches where the metal can be seen. This makes sense since magnitude will pick up this larger change in brightness. Lighter scratches are more blue, similar to the plate paint, and scratch patches are more brown. I need some stronger feature to pick up scrathces, otherwise this will never work.
+I came to this pipeline after some trial and error. Some ideas that did not end up sticking:
 
-I added frangi filters and that seemed to help. I only got one model to work well, an SVM with a linear kernel and ν = 0.01.
+Normalizing colors. I initially had an idea of normalizing colors to a median point. Given a percentage, all colors under mid point would increase luminance by that percentage capping at mid point, and opposite for brighter colors. This did not end up making much of a difference, so I removed it. I also ran some histograms to see if there was a noticeable difference, and there really wasn't enough of a difference to be concerned.
 
-I think Im going to try out using a classifier now instead of an anomaly detector. I want to try a classifier for each class and an object detection model for finding scratches and rust.
+I also tried using contrast filters to reduce glare, but this too did not end up helping much. The glare (particularly for 028.png) is too much for simple contrast filters.
 
-Classifiers work amazingly. SVMs seemed to perform the best with my pick being a linear kernel SVM with variance_target = 0.95 and C=0.1. 
+The main challenge of this was reducing the light reflection from the plate surface. i ended up digging into it and trying to overfit for specific images. My concern was that glare would show up as too similar to rust and scratches by using the classical methods. This is something that would need to be revisited after my initial model testing.
 
-I also want to use object detection. I will need to split the data again like with classifiers probably. I think I will need to add to the pipeline again, probably doing more thresholding and segmenting to extract features of rust and scratches. I will try the embedded approach first as a baseline, then try some detection models, maybe a CNN. 
+Why did I segment out the plate? My initial plan was to use PCA and some kind of linear classifier for this problem. The background is always the same in the test and train images, but if given new data, it is not guarenteed that the background will be the same or that there wont be some noise. In order to keep this model general, I opted to try segmenting it out so that my analysis would capture just the variance of the plates in case of other noise that could come up. I probably could have just processed the entire image since manufacturing lines are pretty standardized, but I have tried doing thresholding before where slight differences in background color (from lighting) would pick up these small differences, adding noise to binary images.
+
+Once I had the original segmented plate, I had to again try reducing the glare. I found an article here discussing removing glare from medical images (https://medium.com/@umamahesvari10/removing-glare-from-medical-images-using-patch-based-inpainting-106da16b405a). I tried that initially, but it really just colored the glare grey. I tried adapting it so that after the glare mask, it would pick up the colors of the surrounding area and try to color the glare regions as that color. It kind of works, but it introduces some more noise. My reasoning for this is that since the glare is almost impossible to tell what it is underneath, I can't assume that the underside is all good. In the case that the glare is on a rusty part, I would want to capture that. I think I need to adjust the parameters of this, but in the interest of time, I will continue on and hope that the patterns of glare are different enough from scratches and rust, but honestly, I think that this is going to reduce model accuracy and pass more defects than I would like.

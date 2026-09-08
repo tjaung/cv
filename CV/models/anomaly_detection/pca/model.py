@@ -1,3 +1,4 @@
+from ..inputs import extract_anomaly_features, input_signature, validate_variant
 import csv
 import json
 from pathlib import Path
@@ -5,20 +6,21 @@ from pathlib import Path
 import numpy as np
 
 from ...patch_features import PatchData
-from ...feature_sets import feature_names, feature_version, feature_signature, extract_model_features
+from ...feature_sets import feature_names, feature_version
 
 
 class PCAAnomalyDetector:
 
-    def __init__(self, variance_target=0.95, patch_size=64, min_coverage=0.5, distance_metric="squared_l2", feature_set="lab_sobel"):
+    def __init__(self, variance_target=0.95, patch_size=64, min_coverage=0.5, distance_metric="squared_l2", feature_set="lab_sobel", preprocessing="full"):
         if not 0 < variance_target < 1:
             raise ValueError('Variance target must be between 0 and 1')
         if distance_metric not in ('l1', 'l2', 'mahalanobis', 'squared_l2'):
             raise ValueError('Unknown distance metric')
 
-        self.config = {'variance_target': variance_target, 'patch_size': patch_size,
-                       'distance_metric': distance_metric, 'min_coverage': min_coverage, 'quantile': .99, 'source': 'full_pipeline_color_after_contrast',
-                       'feature_set': feature_set, 'feature_version': feature_version(feature_set), 'pipeline_signature': feature_signature(feature_set)}
+        validate_variant(preprocessing)
+        self.config = {'preprocessing': preprocessing, 'variance_target': variance_target, 'patch_size': patch_size,
+                       'distance_metric': distance_metric, 'min_coverage': min_coverage, 'quantile': .99, 'source': 'raw_image_features' if preprocessing == 'raw' else 'full_pipeline_color_after_contrast',
+                       'feature_set': feature_set, 'feature_version': feature_version(feature_set), 'pipeline_signature': input_signature(feature_set, preprocessing)}
         self.fitted = False
 
     @property
@@ -122,10 +124,10 @@ class PCAAnomalyDetector:
                 'patches': rows}, z, reconstructed, errors
 
     def test_image(self, image, image_id=''):
-        if self.config['pipeline_signature'] != feature_signature(self.config.get('feature_set', 'lab_sobel')):
+        if self.config['pipeline_signature'] != input_signature(self.config.get('feature_set', 'lab_sobel'), self.config.get('preprocessing', 'full')):
             raise ValueError('Preprocessing or feature code changed; retrain the model')
 
-        patches = extract_model_features(image, image_id, self.config['patch_size'], self.config['min_coverage'], self.config.get('feature_set', 'lab_sobel'))
+        patches = extract_anomaly_features(image, image_id, self.config['patch_size'], self.config['min_coverage'], self.config.get('feature_set', 'lab_sobel'), self.config.get('preprocessing', 'full'))
         result, z, reconstructed, errors = self.score(patches)
 
         return result, patches, z, reconstructed, errors

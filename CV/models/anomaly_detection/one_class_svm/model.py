@@ -6,8 +6,8 @@ from ..pca import PCAAnomalyDetector
 
 
 class OneClassSVMDetector(PCAAnomalyDetector):
-    def __init__(self, variance_target=.95, patch_size=64, nu=.05, kernel='rbf', gamma='scale', feature_set='lab_sobel'):
-        super().__init__(variance_target, patch_size, feature_set=feature_set)
+    def __init__(self, variance_target=.95, patch_size=64, nu=.05, kernel='rbf', gamma='scale', feature_set='lab_sobel', preprocessing='full'):
+        super().__init__(variance_target, patch_size, feature_set=feature_set, preprocessing=preprocessing)
         if not 0 < nu <= 1 or kernel not in ('rbf', 'linear'):
             raise ValueError('Invalid one-class SVM nu or kernel')
         if gamma != 'scale' and (not isinstance(gamma, (float, int)) or gamma <= 0):

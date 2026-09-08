@@ -70,7 +70,8 @@ export interface PreprocessingStep {
   description: string
 }
 
-export type PreprocessingPipeline = 'segmentation' | 'full'
+export type AnomalyPreprocessing = 'full' | 'normalized' | 'raw'
+export type PreprocessingPipeline = 'segmentation' | AnomalyPreprocessing
 
 export async function getPreprocessingSteps(pipeline: PreprocessingPipeline = 'full'): Promise<PreprocessingStep[]> {
   const response = await request(`/preprocessing/steps/?pipeline=${pipeline}`)
@@ -182,7 +183,7 @@ export interface PCAReport {
   patch_threshold: number; plate_threshold: number
   explained_variance_ratio: number[]
   compatible?: boolean; results_saved?: boolean; model_saved?: boolean; model_available?: boolean
-  config: { pipeline_signature?: string; feature_set?: string; model_type?: string; kernel?: string; nu?: number; gamma?: string | number; support_vectors?: number; distance_metric?: string; patch_size: number; variance_target: number; quantile: number; source: string }
+  config: { preprocessing?: AnomalyPreprocessing; pipeline_signature?: string; feature_set?: string; model_type?: string; kernel?: string; nu?: number; gamma?: string | number; support_vectors?: number; distance_metric?: string; patch_size: number; variance_target: number; quantile: number; source: string }
   skipped: { image_id: string; reason: string }[]
   evaluation?: PCAEvaluation | null
 }

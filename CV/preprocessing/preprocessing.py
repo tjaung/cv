@@ -10,7 +10,6 @@ if __package__:
     from .surrounding_color_fill import fill_surrounding_color
     from .boundary_blending import blend_glare_boundary
     from .helpers import get_image
-    from .luminance_correction import adjust_luminance_to_middle_by_percentage
     from .grayscale import to_grayscale
     from .sobel_edge_bold import apply_sobel_edge_bold
     from .gaussian_blur import apply_gaussian_blur
@@ -25,7 +24,6 @@ else:
     from surrounding_color_fill import fill_surrounding_color
     from boundary_blending import blend_glare_boundary
     from helpers import get_image
-    from luminance_correction import adjust_luminance_to_middle_by_percentage
     from grayscale import to_grayscale
     from sobel_edge_bold import apply_sobel_edge_bold
     from gaussian_blur import apply_gaussian_blur
@@ -39,7 +37,6 @@ else:
 
 @dataclass
 class PreprocessingResult:
-    normalized: np.ndarray
     gray: np.ndarray
     blurred: np.ndarray
     edge_bold: np.ndarray
@@ -60,7 +57,6 @@ class PreprocessingResult:
 
 @dataclass
 class SegmentationResult:
-    normalized: np.ndarray
     gray: np.ndarray
     blurred: np.ndarray
     edge_bold: np.ndarray
@@ -71,32 +67,31 @@ class SegmentationResult:
     plate: np.ndarray
 
 
-def segment_plate(image, luminance_percentage=10, blur_size=5,
+def segment_plate(image, blur_size=5,
                   fill_holes=True, allow_border_touching=True,
                   sobel_strength=1.0, threshold_offset=20):
-    """Run only through masking the normalized color plate."""
+    """Run only through masking the original color plate."""
     if image.dtype != np.uint8 or image.ndim != 3 or image.shape[2] != 3 or image.size == 0:
         raise ValueError('Expected a nonempty 8-bit BGR image')
 
-    normalized = adjust_luminance_to_middle_by_percentage(image, luminance_percentage)
     gray = to_grayscale(image)
     blurred = apply_gaussian_blur(gray, blur_size)
     edge_bold = apply_sobel_edge_bold(blurred, sobel_strength)
     threshold_mask, threshold = apply_isodata(edge_bold, threshold_offset)
     cleaned_mask = morphological_cleanup(threshold_mask, fill_holes=fill_holes)
     plate_mask = extract_plate_mask(cleaned_mask, fill_holes, allow_border_touching)
-    plate = apply_plate_mask(normalized, plate_mask)
-    return SegmentationResult(normalized, gray, blurred, edge_bold, threshold,
+    plate = apply_plate_mask(image, plate_mask)
+    return SegmentationResult(gray, blurred, edge_bold, threshold,
                               threshold_mask, cleaned_mask, plate_mask, plate)
 
 
-def preprocess_plate(image, luminance_percentage=10, blur_size=5,
+def preprocess_plate(image, blur_size=5,
                      fill_holes=True, allow_border_touching=True, sobel_strength=1.0, threshold_offset=20,
                      glare_cutoff=220, surrounding_radius=5, run_glare_fill=True, blend_width=3, contrast_factor=1.5):
 
-    segmented = segment_plate(image, luminance_percentage, blur_size, fill_holes,
+    segmented = segment_plate(image, blur_size, fill_holes,
                               allow_border_touching, sobel_strength, threshold_offset)
-    normalized, gray, blurred, edge_bold = (segmented.normalized, segmented.gray,
+    gray, blurred, edge_bold = (segmented.gray,
                                            segmented.blurred, segmented.edge_bold)
     threshold, threshold_mask = segmented.threshold, segmented.threshold_mask
     cleaned_mask, plate_mask, plate = segmented.cleaned_mask, segmented.plate_mask, segmented.plate
@@ -118,7 +113,7 @@ def preprocess_plate(image, luminance_percentage=10, blur_size=5,
     final_plate = cv2.cvtColor(color, cv2.COLOR_YCrCb2BGR)
     final_plate[plate_mask == 0] = 0
 
-    return PreprocessingResult(normalized, gray, blurred, edge_bold, threshold, threshold_mask,
+    return PreprocessingResult(gray, blurred, edge_bold, threshold, threshold_mask,
                                cleaned_mask, plate_mask, plate,
                                plate_gray, glare_mask, color_filled_plate, blended_plate,
                                blurred_plate, clahe_plate, contrast_plate, final_plate)
@@ -128,7 +123,6 @@ def main():
     default_image = Path(__file__).resolve().parents[2] / 'server/anomaly_dataset/metal_plate/train/good/000.png'
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('image', nargs='?', type=Path, default=default_image)
-    parser.add_argument('--luminance-percentage', type=float, default=10)
     parser.add_argument('--contrast-factor', type=float, default=1.5)
     parser.add_argument('--blur-size', type=int, default=5)
     parser.add_argument('--sobel-strength', type=float, default=1.0)
@@ -141,13 +135,13 @@ def main():
     parser.add_argument('--output-dir', type=Path, help='Save stages and preview instead of opening a window')
     args = parser.parse_args()
     image = get_image(str(args.image))
-    result = preprocess_plate(image, args.luminance_percentage, args.blur_size,
+    result = preprocess_plate(image, args.blur_size,
                               not args.keep_holes, args.allow_border_touching, args.sobel_strength, args.threshold_offset,
                               args.glare_cutoff, args.surrounding_radius, blend_width=args.blend_width, contrast_factor=args.contrast_factor)
     if not result.plate_mask.any():
         print('No enclosed plate found. Check contrast, morphology, or --allow-border-touching.')
 
-    stages = [('Raw image', image), ('Normalized', result.normalized),
+    stages = [('Raw image', image),
               ('Grayscale', result.gray), ('Blur', result.blurred), ('Edge darkening', result.edge_bold),
               ('ISODATA', result.threshold_mask),
               ('Morphological cleanup', result.cleaned_mask), ('Plate mask', result.plate_mask),

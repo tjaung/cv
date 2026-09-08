@@ -26,6 +26,39 @@ class PreprocessingPipelineTests(unittest.TestCase):
         np.testing.assert_array_equal(full.plate, segmented.plate)
         np.testing.assert_array_equal(full.plate_mask, segmented.plate_mask)
 
+    def test_anomaly_previews_normalized_color_and_unprocessed_raw(self):
+        from CV.models.anomaly_detection.inputs import normalized_pipeline
+        from CV.preprocessing.luminance_correction import adjust_luminance_to_middle_by_percentage
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            path = root / 'metal_plate/train/good/000.png'
+            path.parent.mkdir(parents=True)
+            image = np.full((140, 140, 3), 220, np.uint8)
+            image[20:120, 20:120] = (90, 40, 20)
+            cv2.imwrite(str(path), image)
+            with patch('server.api.os_helpers.DATASET_ROOT', root):
+                def get(pipeline, step=None):
+                    query = {'image_path': 'metal_plate/train/good/000.png', 'pipeline': pipeline}
+                    if step is not None:
+                        query['step'] = step
+                    return asyncio.run(request('/preprocessing/pipeline/', query=query))
+                for step, expected in [(1, adjust_luminance_to_middle_by_percentage(image, 10)),
+                                       (15, normalized_pipeline(image).final_plate)]:
+                    status, body = get('normalized', step)
+                    self.assertEqual(status, 200)
+                    np.testing.assert_array_equal(cv2.imdecode(np.frombuffer(body, np.uint8), 1), expected)
+                with patch('server.api.preprocessing.segment_plate', side_effect=AssertionError), \
+                     patch('server.api.preprocessing.preprocess_plate', side_effect=AssertionError), \
+                     patch('server.api.preprocessing.normalized_pipeline', side_effect=AssertionError):
+                    status, body = get('raw')
+                    self.assertEqual(status, 200)
+                    np.testing.assert_array_equal(cv2.imdecode(np.frombuffer(body, np.uint8), 1), image)
+                self.assertEqual(get('raw', 1)[0], 422)
+                for pipeline, count in [('normalized', 16), ('raw', 1)]:
+                    status, body = asyncio.run(request('/preprocessing/steps/', query={'pipeline': pipeline}))
+                    self.assertEqual(status, 200)
+                    self.assertEqual([s['number'] for s in json.loads(body)['steps']], list(range(count)))
+
     def test_distinct_steps_and_segmentation_only_patch_preview(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

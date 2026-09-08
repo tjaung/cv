@@ -207,7 +207,17 @@ function DatasetViewer() {
   }, [attempt])
 
   return <>
-    <div className="page-intro"><h2>Dataset viewer</h2><p>Browse image sets, inspect individual images, and compare test images with ground truth.</p></div>
+    <div className="page-intro dataset-intro"><h2>Dataset viewer</h2>
+      <details className="panel preprocessing-writeup" open>
+        <summary>Dataset Exploration</summary>
+        <article className="preprocessing-writeup-content">
+          <p>I made this tool to view images for each dataset. I wanted to manually inspect each image and see if I could identify problems and features that I would need to extract. I ended up choosing the metal plate dataset. Honestly, because I thought that it would be the simplest one to do (though I learned it wasn't as simple).</p>
+          <p>Looking at the images, I noticed a few things that I would need to work on. One is the glare. There is a lot of light reflection on the plate surface, but only for a few training instances. If not preprocessed carefully, it's possible that the glare could be mistaken as a defect.</p>
+          <p>Two, total rust and major rust are similar, but they are also like a continuous representation of the same issue. I would need to distinguish these two classes well.</p>
+          <p>Third, scratches are often very light. I would need to be able to extract light scratches and differentiate them from regular paint bubbles on good plate surfaces.</p>
+        </article>
+      </details>
+    </div>
     <nav className="breadcrumbs" aria-label="Folder navigation">
       <button className="back" disabled={!path.length} onClick={() => setPath(path.slice(0, -1))} aria-label="Go to parent folder">↑</button>
       <button onClick={() => setPath([])} aria-current={!path.length ? 'location' : undefined}>anomaly_dataset</button>

@@ -9,6 +9,8 @@ from .os_helpers import image_path as resolve_image_path
 
 from CV.preprocessing import preprocess_plate, segment_plate
 from CV.models.patch_geometry import patch_boxes
+from CV.models.anomaly_detection.inputs import normalized_pipeline
+from CV.preprocessing.luminance_correction import adjust_luminance_to_middle_by_percentage
 
 
 STEPS = [
@@ -37,14 +39,24 @@ SEGMENTATION_STEPS = STEPS[:8] + [{
     'description': 'Preview the eligible CNN patches on the segmented color plate: 64×64 pixels, stride 32, at least 50% plate coverage. Boxes show input regions, not defect predictions. Whole-plate CNNs use the preceding step.'}]
 
 
-def get_preprocessing_steps(pipeline: Literal['segmentation', 'full'] = 'full'):
-    return {'steps': SEGMENTATION_STEPS if pipeline == 'segmentation' else STEPS}
+NORMALIZED_STEPS = [STEPS[0], {'number': 1, 'name': 'Normalize color',
+    'description': 'Move luminance 10% toward 127.5 for the color branch. The segmentation mask still comes from original grayscale.'}] + [
+    {**step, 'number': step['number'] + 1,
+     'description': step['description'].replace('original, unblurred color', 'normalized, unblurred color')}
+    for step in STEPS[1:]]
+PIPELINES = {'segmentation': SEGMENTATION_STEPS, 'full': STEPS, 'normalized': NORMALIZED_STEPS,
+             'raw': [{'number': 0, 'name': 'Raw image / features only',
+                      'description': 'No segmentation or image correction. Anomaly features are extracted from patches across the entire original image, including background.'}]}
+
+
+def get_preprocessing_steps(pipeline: Literal['segmentation', 'full', 'normalized', 'raw'] = 'full'):
+    return {'steps': PIPELINES[pipeline]}
 
 
 def run_preprocessing_pipeline(
     image_path: Annotated[str, Query(min_length=1, description='Path relative to anomaly_dataset, e.g. metal_plate/train/good/000.png')],
-    step: Annotated[int | None, Query(ge=0, le=LAST_STEP)] = None,
-    pipeline: Literal['segmentation', 'full'] = 'full',
+    step: Annotated[int | None, Query(ge=0, le=LAST_STEP+1)] = None,
+    pipeline: Literal['segmentation', 'full', 'normalized', 'raw'] = 'full',
     blur_size: Annotated[int, Query(ge=1, le=101)] = 5,
     sobel_strength: Annotated[float, Query(ge=0, le=1)] = 1.0,
     threshold_offset: Annotated[float, Query(ge=-100, le=100)] = 20,
@@ -56,7 +68,7 @@ def run_preprocessing_pipeline(
     allow_border_touching: bool = True,
 ):
     """Return a selected pipeline stage as PNG; default to that pipeline’s last stage."""
-    last = len(SEGMENTATION_STEPS)-1 if pipeline == 'segmentation' else LAST_STEP
+    last = len(PIPELINES[pipeline])-1
     step = last if step is None else step
     if step > last:
         raise HTTPException(422, 'Step is not part of the selected pipeline')
@@ -66,15 +78,22 @@ def run_preprocessing_pipeline(
     image = cv2.imread(str(path))
     if image is None:
         raise HTTPException(422, 'Could not decode image')
+    if pipeline == 'raw':
+        success, encoded = cv2.imencode('.png', image)
+        if not success:
+            raise HTTPException(500, 'Could not encode image')
+        return Response(encoded.tobytes(), media_type='image/png', headers={
+            'X-Preprocessing-Step': '0', 'X-Preprocessing-Pipeline': pipeline, 'Cache-Control': 'no-cache'})
     arguments = dict(blur_size=blur_size,
                      fill_holes=fill_holes, allow_border_touching=allow_border_touching,
                      sobel_strength=sobel_strength, threshold_offset=threshold_offset)
     if pipeline == 'segmentation':
         result = segment_plate(image, **arguments)
     else:
-        result = preprocess_plate(image, **arguments, contrast_factor=contrast_factor,
+        processor = normalized_pipeline if pipeline == 'normalized' else preprocess_plate
+        result = processor(image, **arguments, contrast_factor=contrast_factor,
                                   glare_cutoff=glare_cutoff, surrounding_radius=surrounding_radius,
-                                  blend_width=blend_width, run_glare_fill=step >= COLOR_FILL_STEP)
+                                  blend_width=blend_width, run_glare_fill=step >= COLOR_FILL_STEP + (pipeline == 'normalized'))
     stages = [image, result.gray, result.blurred, result.edge_bold,
               result.threshold_mask, result.cleaned_mask, result.plate_mask, result.plate]
     if pipeline == 'segmentation':
@@ -85,11 +104,14 @@ def run_preprocessing_pipeline(
     else:
         stages.extend([result.plate_gray, result.glare_mask, result.color_filled_plate,
                        result.blended_plate, result.blurred_plate, result.clahe_plate, result.final_plate])
+    if pipeline == 'normalized':
+        stages.insert(1, adjust_luminance_to_middle_by_percentage(image, 10))
     success, encoded = cv2.imencode('.png', stages[step])
     if not success:
         raise HTTPException(500, 'Could not encode preprocessing result')
     return Response(encoded.tobytes(), media_type='image/png', headers={
         'X-Preprocessing-Step': str(step),
+        'X-Preprocessing-Pipeline': pipeline,
         'X-Isodata-Threshold': str(result.threshold),
         'X-Plate-Found': str(bool(result.plate_mask.any())).lower(),
         'Cache-Control': 'no-cache',

@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from CV.models import OneClassSVMDetector, PCAAnomalyDetector, PatchData, extract_patch_features
-from CV.models.feature_sets import extract_model_features, feature_signature
+from CV.models.anomaly_detection.inputs import PreprocessingVariant, input_signature, extract_anomaly_features
 from .os_helpers import folder_path, image_path, IMAGE_EXTENSIONS
 from .features import _png
 
@@ -33,6 +33,7 @@ _lock = Lock()
 
 
 class TrainRequest(BaseModel):
+    preprocessing: PreprocessingVariant = 'full'
     patch_size: int = Field(default=64, ge=16, le=256)
     variance_target: float = Field(default=.95, gt=0, lt=1)
     seed: int = Field(default=42, ge=0)
@@ -41,6 +42,7 @@ class TrainRequest(BaseModel):
 
 
 class SweepRequest(BaseModel):
+    preprocessing: PreprocessingVariant = 'full'
     feature_set: Literal['lab_sobel_hog_frangi'] = 'lab_sobel_hog_frangi'
     patch_sizes: list[Literal[32, 64, 128]] = Field(default=[32, 64, 128], min_length=1, max_length=3)
     variance_targets: list[Literal[.9, .95, .99]] = Field(default=[.9, .95, .99], min_length=1, max_length=3)
@@ -121,7 +123,7 @@ def get_models():
             if 'explained_variance_ratio' not in report:
                 with np.load(directory / 'model.npz', allow_pickle=False) as arrays:
                     report['explained_variance_ratio'] = arrays['explained_ratio'].tolist()
-            report['compatible'] = report['config'].get('pipeline_signature') == feature_signature(report['config'].get('feature_set', 'lab_sobel'))
+            report['compatible'] = report['config'].get('pipeline_signature') == input_signature(report['config'].get('feature_set', 'lab_sobel'), report['config'].get('preprocessing', 'full'))
             reports.append({**report, 'evaluation': evaluation})
         from .model_lifecycle import catalog, history
         seen = {r['model_id'] for r in reports}
@@ -158,7 +160,7 @@ def _train_pca(body: TrainRequest, job_id=None, feature_cache=None, model_factor
     if len(paths) < 5:
         raise HTTPException(422, 'Need at least five good training images for image-disjoint calibration')
     def train(job_id):
-        model = model_factory() if model_factory else PCAAnomalyDetector(body.variance_target, body.patch_size, distance_metric=body.distance_metric, feature_set=body.feature_set)
+        model = model_factory() if model_factory else PCAAnomalyDetector(body.variance_target, body.patch_size, distance_metric=body.distance_metric, feature_set=body.feature_set, preprocessing=body.preprocessing)
         groups = {}
         for path in paths:
             groups.setdefault(hashlib.sha256(path.read_bytes()).hexdigest(), []).append(path)
@@ -180,10 +182,10 @@ def _train_pca(body: TrainRequest, job_id=None, feature_cache=None, model_factor
                 try:
                     if image is None:
                         raise ValueError('Could not decode image')
-                    cache_key = (name, body.patch_size, body.feature_set, model.config['min_coverage'])
+                    cache_key = (name, body.patch_size, body.feature_set, model.config['min_coverage'], body.preprocessing)
                     patches = feature_cache.get(cache_key) if feature_cache is not None else None
                     if patches is None:
-                        patches = extract_model_features(image, name, body.patch_size, min_coverage=model.config['min_coverage'], feature_set=body.feature_set)
+                        patches = extract_anomaly_features(image, name, body.patch_size, min_coverage=model.config['min_coverage'], feature_set=body.feature_set, preprocessing=body.preprocessing)
                         if feature_cache is not None:
                             feature_cache[cache_key] = PatchData(patches.values, patches.records)
                 except ValueError as error:
@@ -281,12 +283,12 @@ def _evaluate_pca(model_id=None, job_id=None, feature_cache=None):
                 image = cv2.imread(str(safe))
                 if image is None:
                     raise ValueError('Could not decode image')
-                if model.config['pipeline_signature'] != feature_signature(model.config.get('feature_set', 'lab_sobel')):
+                if model.config['pipeline_signature'] != input_signature(model.config.get('feature_set', 'lab_sobel'), model.config.get('preprocessing', 'full')):
                     raise ValueError('Preprocessing changed; retrain this model')
-                cache_key = (relative, model.config['patch_size'], model.config.get('feature_set', 'lab_sobel'), model.config['min_coverage'])
+                cache_key = (relative, model.config['patch_size'], model.config.get('feature_set', 'lab_sobel'), model.config['min_coverage'], model.config.get('preprocessing', 'full'))
                 patches = feature_cache.get(cache_key) if feature_cache is not None else None
                 if patches is None:
-                    patches = extract_model_features(image, relative, model.config['patch_size'], model.config['min_coverage'], model.config.get('feature_set', 'lab_sobel'))
+                    patches = extract_anomaly_features(image, relative, model.config['patch_size'], model.config['min_coverage'], model.config.get('feature_set', 'lab_sobel'), model.config.get('preprocessing', 'full'))
                     if feature_cache is not None:
                         feature_cache[cache_key] = PatchData(patches.values, patches.records)
                 result, _, _, _ = model.score(patches)
@@ -329,7 +331,7 @@ def train_pca_sweep(body: SweepRequest):
         for index, (patch_size, variance_target, distance_metric) in enumerate(combinations):
             with _lock:
                 _jobs[job_id].update(combination=index + 1, combinations=len(combinations))
-            parameters = dict(patch_size=patch_size, variance_target=variance_target, distance_metric=distance_metric, seed=body.seed, feature_set=body.feature_set)
+            parameters = dict(patch_size=patch_size, variance_target=variance_target, distance_metric=distance_metric, seed=body.seed, feature_set=body.feature_set, preprocessing=body.preprocessing)
             try:
                 trained = _train_pca(TrainRequest(**parameters), job_id, cache)
                 _evaluate_pca(trained['model_id'], job_id, cache)

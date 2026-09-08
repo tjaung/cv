@@ -1,14 +1,16 @@
+import { AnomalyWriteup } from './ModelWriteups'
 import { useEffect, useState } from 'react'
 import SaveModelButton from './SaveModelButton'
 import PatchOverlay from './PatchOverlay'
 import SortHeader from './SortHeader'
 import { useModelSort } from './useModelSort'
 import { getModels, getPCAModel, getModelJob, startPCAJob, getImages, getImageUrl, getModelProjection } from './api'
-import type { ModelJob, PCAModel, PCAReport, PCAProjection } from './api'
+import type { ModelJob, PCAModel, PCAReport, PCAProjection, AnomalyPreprocessing } from './api'
 
 const percent = (v: number | null | undefined) => v == null ? '—' : `${(v * 100).toFixed(1)}%`
 const number = (v: number) => v !== 0 && Math.abs(v) < .001 ? v.toExponential(3) : v.toLocaleString(undefined, { maximumFractionDigits: 3 })
-const runName = (r: PCAReport) => `${r.config.model_type === 'one_class_svm' ? `SVM ${r.config.kernel} · ν ${r.config.nu} · γ ${r.config.gamma}` : `PCA ${r.config.distance_metric ?? 'squared_l2'}`} · ${r.config.patch_size}px · ${percent(r.config.variance_target)} · ${r.model_id.slice(0, 6)}`
+const pipelineNames = { full: 'Full · no normalization', normalized: 'Full · normalization', raw: 'Raw · features only', legacy: 'Legacy pipeline' }
+const runName = (r: PCAReport) => `${r.config.model_type === 'one_class_svm' ? `SVM ${r.config.kernel} · ν ${r.config.nu} · γ ${r.config.gamma}` : `PCA ${r.config.distance_metric ?? 'squared_l2'}`} · ${r.config.patch_size}px · ${percent(r.config.variance_target)} · ${pipelineNames[r.config.preprocessing ?? 'legacy']} · ${r.model_id.slice(0, 6)}`
 
 function useModel(id: string) {
   const [state, setState] = useState<{ id: string; data?: PCAModel; error?: string }>({ id: '' })
@@ -123,6 +125,8 @@ export default function Models() {
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState('')
   const [refresh, setRefresh] = useState(0)
+  const [preprocessing, setPreprocessing] = useState<AnomalyPreprocessing>('full')
+  const [pipelineFilter, setPipelineFilter] = useState('all')
   const [count, setCount] = useState(135)
   useEffect(() => {
     let active = true
@@ -161,12 +165,12 @@ export default function Models() {
   }, [jobId])
   const retrain = async () => {
     setStarting(true); setError('')
-    try { const result = await startPCAJob('retrain_all'); setJob({ job_id: result.job_id, kind: 'retrain_all', status: 'queued', phase: 'Queued', done: 0, total: 0 }) }
+    try { const result = await startPCAJob('retrain_all', { preprocessing }); setJob({ job_id: result.job_id, kind: 'retrain_all', status: 'queued', phase: 'Queued', done: 0, total: 0 }) }
     catch (e) { setError(e instanceof Error ? e.message : 'Could not retrain') }
     finally { setStarting(false) }
   }
   const selected = images.includes(imageChoice) ? imageChoice : images[0] ?? ''
-  const filtered = reports.filter((r) => family === 'all' || (r.config.model_type === 'one_class_svm' ? 'svm' : 'pca') === family)
+  const filtered = reports.filter((r) => (family === 'all' || (r.config.model_type === 'one_class_svm' ? 'svm' : 'pca') === family) && (pipelineFilter === 'all' || (r.config.preprocessing ?? 'legacy') === pipelineFilter))
   const graph = filtered.find((r) => r.model_id === graphChoice) ?? filtered[0]
   const patchState = patchProjection?.key === `${graph?.model_id}:${selected}` ? patchProjection : null
   const patchData = (graph?.compatible !== false || graph?.results_saved) ? patchState?.data : undefined
@@ -191,12 +195,12 @@ export default function Models() {
     }
     window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler)
   }, [images, imageIndex])
-  return <section className="models-comparison-page"><div className="page-intro"><h2>Anomaly detection</h2><p>Compare PCA and one-class SVM. Every new model uses all 459 LAB, Sobel, HOG, and Frangi features from the complete preprocessing pipeline.</p></div>
-    <div className="model-controls panel model-training"><button disabled={!!job || starting} onClick={() => void retrain()}>Retrain all models ({count})</button><span>All supported parameter combinations · CSVs and plot data are kept in CV/results/data. Save selected fitted models to CV/results/models before deleting artifacts.</span></div>
+  return <section className="models-comparison-page"><div className="page-intro model-writeup-intro"><h2>Anomaly detection</h2><AnomalyWriteup /></div>
+    <div className="model-controls panel model-training"><label>Training pipeline <select disabled={!!job || starting} value={preprocessing} onChange={e => setPreprocessing(e.target.value as AnomalyPreprocessing)}>{(['full', 'normalized', 'raw'] as const).map(p => <option key={p} value={p}>{pipelineNames[p]}</option>)}</select></label><button disabled={!!job || starting} onClick={() => void retrain()}>Retrain all models ({count})</button><span>All parameter combinations for the selected pipeline. Other pipelines are retained for comparison · CSVs and plot data are kept in CV/results/data. Save selected fitted models to CV/results/models before deleting artifacts.</span></div>
     <nav className="model-tabs" aria-label="Filter model types">{[['all', 'All models'], ['pca', 'PCA'], ['svm', 'One-class SVM']].map(([value, label]) => <button key={value} aria-current={family === value ? 'page' : undefined} onClick={() => setFamily(value)}>{label}</button>)}</nav>
     {error && <p role="alert" className="panel empty">{error}</p>}
     {job && <div className="panel model-progress" role="status">{job.combinations ? `${job.combination ?? 0} / ${job.combinations} processed · ${job.completed ?? 0} saved · ${job.failed ?? 0} failed · ` : ''}{job.phase} {job.total ? `${job.done} / ${job.total}` : ''}</div>}
-    <section className="panel"><div className="panel-heading"><h3>Performance summary</h3><span>{filtered.length} models</span></div><p className="feature-note">Default ranking: defect recall, then fewer false alarms. Click headers to sort. Class columns show correctly labeled images as correct/total (percentage): GOOD for good plates, BAD for each defect type.</p>
+    <section className="panel"><div className="panel-heading"><h3>Performance summary</h3><label>Compare pipeline <select value={pipelineFilter} onChange={e => setPipelineFilter(e.target.value)}><option value="all">All pipelines</option>{Object.entries(pipelineNames).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><span>{filtered.length} models</span></div><p className="feature-note">Default ranking: defect recall, then fewer false alarms. Click headers to sort. Class columns show correctly labeled images as correct/total (percentage): GOOD for good plates, BAD for each defect type.</p>
       <div className="model-table-scroll model-summary-table"><table><thead><tr>{[['name','Model'],['images','Images / skipped'],['accuracy','Accuracy'],['recall','Recall'],['precision','Precision'],['f1','F1'],['fpr','False alarms'],['tp','TP'],['fp','FP'],['tn','TN'],['fn','FN']].map(([key,label]) => <SortHeader key={key} column={key} sort={summary.sort} onSort={summary.choose}>{label}</SortHeader>)}{classes.map((label) => <SortHeader key={label} column={`class:${label}`} sort={summary.sort} onSort={summary.choose}>{label}</SortHeader>)}<th>Keep fitted model</th></tr></thead>
         <tbody>{summary.rows.map((r) => { const e = r.evaluation; return <tr key={r.model_id}><th>{runName(r)}{r.config.feature_set !== 'lab_sobel_hog_frangi' && ' · legacy features'}</th><td>{e ? `${e.images} / ${e.skipped.length}` : 'Not evaluated'}</td><td>{percent(e?.images ? (e.tp + e.tn) / e.images : null)}</td><td>{percent(e?.recall)}</td><td>{percent(e?.precision)}</td><td>{percent(e && 2*e.tp+e.fp+e.fn ? 2*e.tp/(2*e.tp+e.fp+e.fn) : null)}</td><td>{percent(e?.false_positive_rate)}</td>{(['tp','fp','tn','fn'] as const).map((k) => <td key={k}>{e?.[k] ?? '—'}</td>)}{classes.map((label) => { const rows = e?.rows.filter((p) => p.label === label) ?? []; const correct = rows.filter((p) => p.prediction === p.actual).length; return <td key={label}>{rows.length ? `${correct}/${rows.length} (${percent(correct / rows.length)})` : '—'}</td> })}<td><SaveModelButton family="anomaly" modelId={r.model_id} saved={r.model_saved} available={r.model_available} /></td></tr> })}</tbody></table></div>
       {!filtered.length && <p className="empty">No fitted models in this view. Use Retrain all models to populate the comparison.</p>}

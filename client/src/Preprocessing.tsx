@@ -60,8 +60,8 @@ function StageImage({ image, step, pipeline, allowBorderTouching, thresholdOffse
     {error ? <div className="stage-error"><p>{error}</p>{!thumbnail && <button onClick={() => { setResult(null); setError(''); setAttempt(attempt + 1) }}>Try again</button>}</div>
       : result ? <>
         <img src={result.url} alt={`${image.name}, preprocessing step ${step}`} onError={() => setError('Could not display the processed image.')} />
-        {step >= 5 && result.threshold !== null && <span className="threshold-readout">ISODATA {result.threshold.toFixed(1)}</span>}
-        {step >= 7 && !result.plateFound && <span className="no-plate">No plate found{!thumbnail && '. Try allowing border-connected regions above, or inspect the ISODATA and Cleanup views.'}</span>}
+        {pipeline !== 'raw' && step >= (pipeline === 'normalized' ? 5 : 4) && result.threshold !== null && <span className="threshold-readout">ISODATA {result.threshold.toFixed(1)}</span>}
+        {pipeline !== 'raw' && step >= (pipeline === 'normalized' ? 7 : 6) && !result.plateFound && <span className="no-plate">No plate found{!thumbnail && '. Try allowing border-connected regions above, or inspect the ISODATA and Cleanup views.'}</span>}
       </>
       : <span className="stage-loading">{step === 0 ? 'Loading image…' : 'Processing…'}</span>}
   </div>
@@ -73,7 +73,7 @@ export default function Preprocessing() {
   const [attempt, setAttempt] = useState(0)
   const [split, setSplit] = useState<'all' | Split>('all')
   const [pipeline, setPipeline] = useState<PreprocessingPipeline>('segmentation')
-  const [stepChoices, setStepChoices] = useState({ segmentation: 0, full: 0 })
+  const [stepChoices, setStepChoices] = useState({ segmentation: 0, full: 0, normalized: 0, raw: 0 })
   const step = stepChoices[pipeline]
   const setStep = (number: number) => setStepChoices(previous => ({ ...previous, [pipeline]: number }))
   const [selected, setSelected] = useState<string | null>(null)
@@ -85,12 +85,12 @@ export default function Preprocessing() {
 
   useEffect(() => {
     let active = true
-    Promise.all([getImages('metal_plate', 'train'), getImages('metal_plate', 'test'), getPreprocessingSteps('segmentation'), getPreprocessingSteps('full')])
-      .then(([train, test, segmentation, full]) => {
+    Promise.all([getImages('metal_plate', 'train'), getImages('metal_plate', 'test'), getPreprocessingSteps('segmentation'), getPreprocessingSteps('full'), getPreprocessingSteps('normalized'), getPreprocessingSteps('raw')])
+      .then(([train, test, segmentation, full, normalized, raw]) => {
         if (!active) return
         const images = (['train', 'test'] as const).flatMap((part) =>
           (part === 'train' ? train : test).map((name) => ({ path: `metal_plate/${part}/${name}`, name, split: part })))
-        setDataset({ images, steps: { segmentation, full } })
+        setDataset({ images, steps: { segmentation, full, normalized, raw } })
       }).catch((reason: unknown) => {
         if (active) setError(reason instanceof Error ? reason.message : 'Could not load metal plate images.')
       })
@@ -132,12 +132,12 @@ export default function Preprocessing() {
                 {value === 'all' ? 'All images' : value === 'train' ? 'Training' : 'Test'} <span className="count">{dataset.images.filter((image) => value === 'all' || image.split === value).length}</span>
               </button>)}
             </div>
-            <label className="cropped-option"><input type="checkbox" checked={allowBorderTouching} onChange={(event) => setAllowBorderTouching(event.target.checked)} /> Allow border-connected regions</label>
+            <label className="cropped-option"><input type="checkbox" disabled={pipeline === 'raw'} checked={allowBorderTouching} onChange={(event) => setAllowBorderTouching(event.target.checked)} /> Allow border-connected regions</label>
           </div>
           <div className="view-switch" role="tablist" aria-label="Preprocessing pipeline">
-            {([['segmentation', 'Segmentation'], ['full', 'Full pipeline']] as const).map(([value, label]) => <button key={value} id={`pipeline-tab-${value}`} role="tab" aria-selected={pipeline === value} aria-controls="pipeline-preview" onClick={() => setPipeline(value)}>{label}</button>)}
+            {([['segmentation', 'Segmentation · CNN'], ['full', 'Full · no normalization'], ['normalized', 'Full · normalization'], ['raw', 'Raw · features only']] as const).map(([value, label]) => <button key={value} id={`pipeline-tab-${value}`} role="tab" aria-selected={pipeline === value} aria-controls="pipeline-preview" onClick={() => setPipeline(value)}>{label}</button>)}
           </div>
-          <p className="step-description">{pipeline === 'segmentation'
+          <p className="step-description">{pipeline === 'raw' ? 'No image preprocessing or segmentation. Anomaly features use the entire image, including background.' : pipeline === 'normalized' ? 'Anomaly comparison: apply 10% luminance correction to the color branch, then run the full pipeline. Mask extraction still uses original grayscale.' : pipeline === 'segmentation'
             ? 'Build a mask from the grayscale branch, then apply it to the original color image. Whole-image CNNs use the segmented plate; patch CNNs extract overlapping 64×64 regions with stride 32. Patch boxes are input regions, not predictions.'
             : 'Continue after segmentation with glare detection, surrounding-color fill, boundary blending, plate blur, CLAHE and final contrast. The final color plate feeds LAB, Sobel, HOG and Frangi features for classical anomaly detectors and classifiers.'}</p>
           <div className="pipeline-steps" aria-label="Preprocessing steps">
