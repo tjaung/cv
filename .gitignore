@@ -257,5 +257,5 @@ playground/glob-import/root/follow-symlinks/linked/my-lib
 # Durable generated result data and selected estimators
 /CV/results/data/*
 !/CV/results/data/.gitkeep
-/CV/results/models/*
+# /CV/results/models/*
 !/CV/results/models/.gitkeep
